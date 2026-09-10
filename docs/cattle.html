@@ -1,0 +1,1601 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en" xml:lang="en"><head>
+
+<meta charset="utf-8">
+<meta name="generator" content="quarto-1.7.8">
+
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
+
+
+<title>A cattle E. coli model, in R and in Julia</title>
+<style>
+code{white-space: pre-wrap;}
+span.smallcaps{font-variant: small-caps;}
+div.columns{display: flex; gap: min(4vw, 1.5em);}
+div.column{flex: auto; overflow-x: auto;}
+div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+ul.task-list{list-style: none;}
+ul.task-list li input[type="checkbox"] {
+  width: 0.8em;
+  margin: 0 0.8em 0.2em -1em; /* quarto-specific, see https://github.com/quarto-dev/quarto-cli/issues/4556 */ 
+  vertical-align: middle;
+}
+/* CSS for syntax highlighting */
+pre > code.sourceCode { white-space: pre; position: relative; }
+pre > code.sourceCode > span { line-height: 1.25; }
+pre > code.sourceCode > span:empty { height: 1.2em; }
+.sourceCode { overflow: visible; }
+code.sourceCode > span { color: inherit; text-decoration: inherit; }
+div.sourceCode { margin: 1em 0; }
+pre.sourceCode { margin: 0; }
+@media screen {
+div.sourceCode { overflow: auto; }
+}
+@media print {
+pre > code.sourceCode { white-space: pre-wrap; }
+pre > code.sourceCode > span { display: inline-block; text-indent: -5em; padding-left: 5em; }
+}
+pre.numberSource code
+  { counter-reset: source-line 0; }
+pre.numberSource code > span
+  { position: relative; left: -4em; counter-increment: source-line; }
+pre.numberSource code > span > a:first-child::before
+  { content: counter(source-line);
+    position: relative; left: -1em; text-align: right; vertical-align: baseline;
+    border: none; display: inline-block;
+    -webkit-touch-callout: none; -webkit-user-select: none;
+    -khtml-user-select: none; -moz-user-select: none;
+    -ms-user-select: none; user-select: none;
+    padding: 0 4px; width: 4em;
+  }
+pre.numberSource { margin-left: 3em;  padding-left: 4px; }
+div.sourceCode
+  {   }
+@media screen {
+pre > code.sourceCode > span > a:first-child::before { text-decoration: underline; }
+}
+</style>
+
+
+<script src="cattle_files/libs/clipboard/clipboard.min.js"></script>
+<script src="cattle_files/libs/quarto-html/quarto.js" type="module"></script>
+<script src="cattle_files/libs/quarto-html/tabsets/tabsets.js" type="module"></script>
+<script src="cattle_files/libs/quarto-html/popper.min.js"></script>
+<script src="cattle_files/libs/quarto-html/tippy.umd.min.js"></script>
+<script src="cattle_files/libs/quarto-html/anchor.min.js"></script>
+<link href="cattle_files/libs/quarto-html/tippy.css" rel="stylesheet">
+<link href="cattle_files/libs/quarto-html/quarto-syntax-highlighting-fae04a4dda57acfb7da1e58796bfa73f.css" rel="stylesheet" id="quarto-text-highlighting-styles">
+<script src="cattle_files/libs/bootstrap/bootstrap.min.js"></script>
+<link href="cattle_files/libs/bootstrap/bootstrap-icons.css" rel="stylesheet">
+<link href="cattle_files/libs/bootstrap/bootstrap-a1ff8711b79ae3724c050874b28d9907.min.css" rel="stylesheet" append-hash="true" id="quarto-bootstrap" data-mode="light">
+
+
+</head>
+
+<body>
+
+<div id="quarto-content" class="page-columns page-rows-contents page-layout-article">
+<div id="quarto-margin-sidebar" class="sidebar margin-sidebar">
+  <nav id="TOC" role="doc-toc" class="toc-active">
+    <h2 id="toc-title">Table of contents</h2>
+   
+  <ul>
+  <li><a href="#what-this-document-is" id="toc-what-this-document-is" class="nav-link active" data-scroll-target="#what-this-document-is">What this document is</a>
+  <ul class="collapse">
+  <li><a href="#the-model" id="toc-the-model" class="nav-link" data-scroll-target="#the-model">The model</a></li>
+  </ul></li>
+  <li><a href="#setting-up" id="toc-setting-up" class="nav-link" data-scroll-target="#setting-up">Setting up</a></li>
+  <li><a href="#the-problem-size" id="toc-the-problem-size" class="nav-link" data-scroll-target="#the-problem-size">The problem size</a></li>
+  <li><a href="#what-to-track" id="toc-what-to-track" class="nav-link" data-scroll-target="#what-to-track">What to track</a></li>
+  <li><a href="#the-rates" id="toc-the-rates" class="nav-link" data-scroll-target="#the-rates">The rates</a></li>
+  <li><a href="#the-transitions" id="toc-the-transitions" class="nav-link" data-scroll-target="#the-transitions">The transitions</a></li>
+  <li><a href="#where-an-animal-starts" id="toc-where-an-animal-starts" class="nav-link" data-scroll-target="#where-an-animal-starts">Where an animal starts</a></li>
+  <li><a href="#what-we-observe" id="toc-what-we-observe" class="nav-link" data-scroll-target="#what-we-observe">What we observe</a></li>
+  <li><a href="#assembling" id="toc-assembling" class="nav-link" data-scroll-target="#assembling">Assembling</a></li>
+  <li><a href="#parameters-and-priors" id="toc-parameters-and-priors" class="nav-link" data-scroll-target="#parameters-and-priors">Parameters and priors</a></li>
+  <li><a href="#the-sampler" id="toc-the-sampler" class="nav-link" data-scroll-target="#the-sampler">The sampler</a></li>
+  <li><a href="#results" id="toc-results" class="nav-link" data-scroll-target="#results">Results</a></li>
+  <li><a href="#seeing-the-julia-from-r" id="toc-seeing-the-julia-from-r" class="nav-link" data-scroll-target="#seeing-the-julia-from-r">Seeing the Julia from R</a></li>
+  <li><a href="#where-to-go-next" id="toc-where-to-go-next" class="nav-link" data-scroll-target="#where-to-go-next">Where to go next</a></li>
+  </ul>
+</nav>
+</div>
+<main class="content" id="quarto-document-content">
+
+<header id="title-block-header" class="quarto-title-block default">
+<div class="quarto-title">
+<div class="quarto-title-block"><div><h1 class="title">A cattle E. coli model, in R and in Julia</h1><button type="button" class="btn code-tools-button" id="quarto-code-tools-source"><i class="bi"></i> Code</button></div></div>
+<p class="subtitle lead">The same model written both ways, side by side</p>
+</div>
+
+
+
+<div class="quarto-title-meta">
+
+    
+  
+    
+  </div>
+  
+
+
+</header>
+
+
+<section id="what-this-document-is" class="level2">
+<h2 class="anchored" data-anchor-id="what-this-document-is">What this document is</h2>
+<p>One small model, written twice: once in R, once in Julia. Every code block below has both, and <strong>the tabs are the same model</strong> — pick whichever language you work in.</p>
+<p>The point is not that the two look similar (they do), but that the <em>shape</em> of the specification is identical. If you learn it in one language you have learned it in the other, and a model prototyped in R can graduate to Julia without being rethought.</p>
+<p>The model is deliberately small and readable. Where the badger document optimises, this one does not: it is about how little you have to write.</p>
+<section id="the-model" class="level3">
+<h3 class="anchored" data-anchor-id="the-model">The model</h3>
+<p>Two states, <code>S</code> and <code>I</code>, with recurrent <code>S ⇄ I</code>. An animal is infected at a rate driven by how many of its penmates are infected, and recovers back to susceptible.</p>
+<p>Neither state is ever observed. All we see are two imperfect diagnostic tests, on a subset of days — so the trajectory is entirely latent, and inferring it is the whole problem.</p>
+<p>This is the E. coli cattle model of Touloupou et al.&nbsp;(2019).</p>
+</section>
+</section>
+<section id="setting-up" class="level2">
+<h2 class="anchored" data-anchor-id="setting-up">Setting up</h2>
+<div class="tabset-margin-container"></div><div class="panel-tabset">
+<ul class="nav nav-tabs" role="tablist"><li class="nav-item" role="presentation"><a class="nav-link active" id="tabset-1-1-tab" data-bs-toggle="tab" data-bs-target="#tabset-1-1" role="tab" aria-controls="tabset-1-1" aria-selected="true" href="">R</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-1-2-tab" data-bs-toggle="tab" data-bs-target="#tabset-1-2" role="tab" aria-controls="tabset-1-2" aria-selected="false" href="">Julia</a></li></ul>
+<div class="tab-content">
+<div id="tabset-1-1" class="tab-pane active" role="tabpanel" aria-labelledby="tabset-1-1-tab">
+<div class="cell">
+<div class="sourceCode cell-code" id="cb1"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a><span class="co"># install.packages("remotes")</span></span>
+<span id="cb1-2"><a href="#cb1-2" aria-hidden="true" tabindex="-1"></a>remotes<span class="sc">::</span><span class="fu">install_github</span>(<span class="st">"EvoArt/EpidemicTrajectoriesR"</span>)</span>
+<span id="cb1-3"><a href="#cb1-3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb1-4"><a href="#cb1-4" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(EpidemicTrajectoriesR)</span>
+<span id="cb1-5"><a href="#cb1-5" aria-hidden="true" tabindex="-1"></a><span class="fu">et_setup</span>()      <span class="co"># starts Julia and resolves its dependencies on first use</span></span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</div>
+</div>
+<div id="tabset-1-2" class="tab-pane" role="tabpanel" aria-labelledby="tabset-1-2-tab">
+<div class="sourceCode" id="cb2"><pre class="sourceCode julia code-with-copy"><code class="sourceCode julia"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a><span class="im">using</span> <span class="bu">Pkg</span></span>
+<span id="cb2-2"><a href="#cb2-2" aria-hidden="true" tabindex="-1"></a><span class="bu">Pkg</span>.<span class="fu">add</span>(url <span class="op">=</span> <span class="st">"https://github.com/EvoArt/EpidemicTrajectories.jl"</span>)</span>
+<span id="cb2-3"><a href="#cb2-3" aria-hidden="true" tabindex="-1"></a><span class="bu">Pkg</span>.<span class="fu">add</span>(url <span class="op">=</span> <span class="st">"https://github.com/EvoArt/PracticalBayes.jl"</span>)</span>
+<span id="cb2-4"><a href="#cb2-4" aria-hidden="true" tabindex="-1"></a><span class="bu">Pkg</span>.<span class="fu">add</span>(url <span class="op">=</span> <span class="st">"https://github.com/EvoArt/PracticalEpiBayes.jl"</span>)</span>
+<span id="cb2-5"><a href="#cb2-5" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb2-6"><a href="#cb2-6" aria-hidden="true" tabindex="-1"></a><span class="im">using</span> <span class="bu">EpidemicTrajectories</span>, <span class="bu">PracticalBayes</span>, <span class="bu">PracticalEpiBayes</span></span>
+<span id="cb2-7"><a href="#cb2-7" aria-hidden="true" tabindex="-1"></a><span class="im">using</span> <span class="bu">Distributions</span>, <span class="bu">Random</span>, <span class="bu">StableRNGs</span></span>
+<span id="cb2-8"><a href="#cb2-8" aria-hidden="true" tabindex="-1"></a><span class="im">import</span> <span class="bu">AbstractMCMC</span></span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</div>
+</div>
+</div>
+</section>
+<section id="the-problem-size" class="level2">
+<h2 class="anchored" data-anchor-id="the-problem-size">The problem size</h2>
+<div class="tabset-margin-container"></div><div class="panel-tabset">
+<ul class="nav nav-tabs" role="tablist"><li class="nav-item" role="presentation"><a class="nav-link active" id="tabset-2-1-tab" data-bs-toggle="tab" data-bs-target="#tabset-2-1" role="tab" aria-controls="tabset-2-1" aria-selected="true" href="">R</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-2-2-tab" data-bs-toggle="tab" data-bs-target="#tabset-2-2" role="tab" aria-controls="tabset-2-2" aria-selected="false" href="">Julia</a></li></ul>
+<div class="tab-content">
+<div id="tabset-2-1" class="tab-pane active" role="tabpanel" aria-labelledby="tabset-2-1-tab">
+<div class="cell">
+<div class="sourceCode cell-code" id="cb3"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb3-1"><a href="#cb3-1" aria-hidden="true" tabindex="-1"></a>n_pens        <span class="ot">&lt;-</span> <span class="dv">10</span></span>
+<span id="cb3-2"><a href="#cb3-2" aria-hidden="true" tabindex="-1"></a>n_per_pen     <span class="ot">&lt;-</span> <span class="dv">8</span></span>
+<span id="cb3-3"><a href="#cb3-3" aria-hidden="true" tabindex="-1"></a>n_timepoints  <span class="ot">&lt;-</span> <span class="dv">80</span></span>
+<span id="cb3-4"><a href="#cb3-4" aria-hidden="true" tabindex="-1"></a>n_individuals <span class="ot">&lt;-</span> n_pens <span class="sc">*</span> n_per_pen</span>
+<span id="cb3-5"><a href="#cb3-5" aria-hidden="true" tabindex="-1"></a>group         <span class="ot">&lt;-</span> <span class="fu">rep</span>(<span class="fu">seq_len</span>(n_pens), <span class="at">each =</span> n_per_pen)</span>
+<span id="cb3-6"><a href="#cb3-6" aria-hidden="true" tabindex="-1"></a>observed_days <span class="ot">&lt;-</span> <span class="fu">seq</span>(<span class="dv">1</span>, n_timepoints, <span class="at">by =</span> <span class="dv">6</span>)</span>
+<span id="cb3-7"><a href="#cb3-7" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb3-8"><a href="#cb3-8" aria-hidden="true" tabindex="-1"></a>states <span class="ot">&lt;-</span> <span class="fu">c</span>(<span class="st">"S"</span>, <span class="st">"I"</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</div>
+</div>
+<div id="tabset-2-2" class="tab-pane" role="tabpanel" aria-labelledby="tabset-2-2-tab">
+<div class="sourceCode" id="cb4"><pre class="sourceCode julia code-with-copy"><code class="sourceCode julia"><span id="cb4-1"><a href="#cb4-1" aria-hidden="true" tabindex="-1"></a>n_pens        <span class="op">=</span> <span class="fl">10</span></span>
+<span id="cb4-2"><a href="#cb4-2" aria-hidden="true" tabindex="-1"></a>n_per_pen     <span class="op">=</span> <span class="fl">8</span></span>
+<span id="cb4-3"><a href="#cb4-3" aria-hidden="true" tabindex="-1"></a>n_timepoints  <span class="op">=</span> <span class="fl">80</span></span>
+<span id="cb4-4"><a href="#cb4-4" aria-hidden="true" tabindex="-1"></a>n_individuals <span class="op">=</span> n_pens <span class="op">*</span> n_per_pen</span>
+<span id="cb4-5"><a href="#cb4-5" aria-hidden="true" tabindex="-1"></a>group         <span class="op">=</span> <span class="fu">repeat</span>(<span class="fl">1</span><span class="op">:</span>n_pens; inner <span class="op">=</span> n_per_pen)</span>
+<span id="cb4-6"><a href="#cb4-6" aria-hidden="true" tabindex="-1"></a>observed_days <span class="op">=</span> <span class="fu">collect</span>(<span class="fl">1</span><span class="op">:</span><span class="fl">6</span><span class="op">:</span>n_timepoints)</span>
+<span id="cb4-7"><a href="#cb4-7" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb4-8"><a href="#cb4-8" aria-hidden="true" tabindex="-1"></a>state_space <span class="op">=</span> [<span class="op">:</span>S, <span class="op">:</span>I]</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</div>
+</div>
+</div>
+<p>Declaring the state space fixes the numbering, so you and the package agree on which state is which: <code>S</code> is 1, <code>I</code> is 2.</p>
+</section>
+<section id="what-to-track" class="level2">
+<h2 class="anchored" data-anchor-id="what-to-track">What to track</h2>
+<p>The force of infection needs to know how many penmates are infected. Declare the array and how it updates; the package allocates it and keeps it in step with the trajectory.</p>
+<p>It needs the <em>update</em> rather than just the array because the sampler must be able to take one animal’s contribution back out, resample it, and put it back — which is what gives each animal the leave-one-out count its force of infection wants.</p>
+<div class="tabset-margin-container"></div><div class="panel-tabset">
+<ul class="nav nav-tabs" role="tablist"><li class="nav-item" role="presentation"><a class="nav-link active" id="tabset-3-1-tab" data-bs-toggle="tab" data-bs-target="#tabset-3-1" role="tab" aria-controls="tabset-3-1" aria-selected="true" href="">R</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-3-2-tab" data-bs-toggle="tab" data-bs-target="#tabset-3-2" role="tab" aria-controls="tabset-3-2" aria-selected="false" href="">Julia</a></li></ul>
+<div class="tab-content">
+<div id="tabset-3-1" class="tab-pane active" role="tabpanel" aria-labelledby="tabset-3-1-tab">
+<div class="cell">
+<div class="sourceCode cell-code" id="cb5"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb5-1"><a href="#cb5-1" aria-hidden="true" tabindex="-1"></a>aggs <span class="ot">&lt;-</span> <span class="fu">et_aggregate</span>(</span>
+<span id="cb5-2"><a href="#cb5-2" aria-hidden="true" tabindex="-1"></a>  states,</span>
+<span id="cb5-3"><a href="#cb5-3" aria-hidden="true" tabindex="-1"></a>  <span class="at">arrays =</span> <span class="fu">list</span>(<span class="at">n_infected =</span> <span class="fu">et_array</span>(<span class="st">"Int"</span>, <span class="fu">c</span>(n_pens, n_timepoints))),</span>
+<span id="cb5-4"><a href="#cb5-4" aria-hidden="true" tabindex="-1"></a>  <span class="at">update =</span> <span class="cf">function</span>(model, data, X, state, i, t) {</span>
+<span id="cb5-5"><a href="#cb5-5" aria-hidden="true" tabindex="-1"></a>    n_infected[data<span class="sc">$</span>group[i], t] <span class="ot">&lt;-</span> n_infected[data<span class="sc">$</span>group[i], t] <span class="sc">+</span> (state <span class="sc">==</span> <span class="st">"I"</span>)</span>
+<span id="cb5-6"><a href="#cb5-6" aria-hidden="true" tabindex="-1"></a>  })</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</div>
+</div>
+<div id="tabset-3-2" class="tab-pane" role="tabpanel" aria-labelledby="tabset-3-2-tab">
+<div class="sourceCode" id="cb6"><pre class="sourceCode julia code-with-copy"><code class="sourceCode julia"><span id="cb6-1"><a href="#cb6-1" aria-hidden="true" tabindex="-1"></a>aggs <span class="op">=</span> <span class="pp">@aggregate</span> state_space <span class="cf">begin</span></span>
+<span id="cb6-2"><a href="#cb6-2" aria-hidden="true" tabindex="-1"></a>    <span class="pp">@array</span> n_infected <span class="dt">Int</span> (n_pens, n_timepoints)</span>
+<span id="cb6-3"><a href="#cb6-3" aria-hidden="true" tabindex="-1"></a>    n_infected[data.group[i], t] <span class="op">+=</span> (state <span class="op">==</span> <span class="op">:</span>I)</span>
+<span id="cb6-4"><a href="#cb6-4" aria-hidden="true" tabindex="-1"></a><span class="cf">end</span></span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</div>
+</div>
+</div>
+<p>The package attaches no meaning to this array. It is whatever your rates need.</p>
+</section>
+<section id="the-rates" class="level2">
+<h2 class="anchored" data-anchor-id="the-rates">The rates</h2>
+<p>Ordinary functions of <code>(model, data, i, t)</code>. <code>model</code> holds the parameters; <code>data</code> holds everything else, including the tracked array above.</p>
+<div class="tabset-margin-container"></div><div class="panel-tabset">
+<ul class="nav nav-tabs" role="tablist"><li class="nav-item" role="presentation"><a class="nav-link active" id="tabset-4-1-tab" data-bs-toggle="tab" data-bs-target="#tabset-4-1" role="tab" aria-controls="tabset-4-1" aria-selected="true" href="">R</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-4-2-tab" data-bs-toggle="tab" data-bs-target="#tabset-4-2" role="tab" aria-controls="tabset-4-2" aria-selected="false" href="">Julia</a></li></ul>
+<div class="tab-content">
+<div id="tabset-4-1" class="tab-pane active" role="tabpanel" aria-labelledby="tabset-4-1-tab">
+<div class="cell">
+<div class="sourceCode cell-code" id="cb7"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb7-1"><a href="#cb7-1" aria-hidden="true" tabindex="-1"></a>infection <span class="ot">&lt;-</span> <span class="cf">function</span>(model, data, i, t) {</span>
+<span id="cb7-2"><a href="#cb7-2" aria-hidden="true" tabindex="-1"></a>  I_minus <span class="ot">&lt;-</span> data<span class="sc">$</span>aggregates<span class="sc">$</span>n_infected[data<span class="sc">$</span>group[i], t]</span>
+<span id="cb7-3"><a href="#cb7-3" aria-hidden="true" tabindex="-1"></a>  <span class="sc">-</span><span class="fu">expm1</span>(<span class="sc">-</span>(model<span class="sc">$</span>alpha <span class="sc">+</span> model<span class="sc">$</span>beta <span class="sc">*</span> I_minus))</span>
+<span id="cb7-4"><a href="#cb7-4" aria-hidden="true" tabindex="-1"></a>}</span>
+<span id="cb7-5"><a href="#cb7-5" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb7-6"><a href="#cb7-6" aria-hidden="true" tabindex="-1"></a>recovery <span class="ot">&lt;-</span> <span class="cf">function</span>(model, data, i, t) <span class="dv">1</span> <span class="sc">/</span> model<span class="sc">$</span>m</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</div>
+</div>
+<div id="tabset-4-2" class="tab-pane" role="tabpanel" aria-labelledby="tabset-4-2-tab">
+<div class="sourceCode" id="cb8"><pre class="sourceCode julia code-with-copy"><code class="sourceCode julia"><span id="cb8-1"><a href="#cb8-1" aria-hidden="true" tabindex="-1"></a><span class="kw">function</span> <span class="fu">infection</span>(model, data, i, t)</span>
+<span id="cb8-2"><a href="#cb8-2" aria-hidden="true" tabindex="-1"></a>    I_minus <span class="op">=</span> data.aggregates.n_infected[data.group[i], t]</span>
+<span id="cb8-3"><a href="#cb8-3" aria-hidden="true" tabindex="-1"></a>    <span class="fu">-expm1</span>(<span class="fu">-</span>(model.α <span class="op">+</span> model.β <span class="op">*</span> I_minus))</span>
+<span id="cb8-4"><a href="#cb8-4" aria-hidden="true" tabindex="-1"></a><span class="kw">end</span></span>
+<span id="cb8-5"><a href="#cb8-5" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb8-6"><a href="#cb8-6" aria-hidden="true" tabindex="-1"></a><span class="fu">recovery</span>(model, data, i, t) <span class="op">=</span> <span class="fl">1</span> <span class="op">/</span> model.m</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</div>
+</div>
+</div>
+<p><code>n_infected</code> excludes the animal currently being resampled, which is exactly the leave-one-out count the force of infection needs — you get that for free from having declared a reversible update.</p>
+</section>
+<section id="the-transitions" class="level2">
+<h2 class="anchored" data-anchor-id="the-transitions">The transitions</h2>
+<div class="tabset-margin-container"></div><div class="panel-tabset">
+<ul class="nav nav-tabs" role="tablist"><li class="nav-item" role="presentation"><a class="nav-link active" id="tabset-5-1-tab" data-bs-toggle="tab" data-bs-target="#tabset-5-1" role="tab" aria-controls="tabset-5-1" aria-selected="true" href="">R</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-5-2-tab" data-bs-toggle="tab" data-bs-target="#tabset-5-2" role="tab" aria-controls="tabset-5-2" aria-selected="false" href="">Julia</a></li></ul>
+<div class="tab-content">
+<div id="tabset-5-1" class="tab-pane active" role="tabpanel" aria-labelledby="tabset-5-1-tab">
+<div class="cell">
+<div class="sourceCode cell-code" id="cb9"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb9-1"><a href="#cb9-1" aria-hidden="true" tabindex="-1"></a>trans <span class="ot">&lt;-</span> <span class="fu">et_transitions</span>(states,</span>
+<span id="cb9-2"><a href="#cb9-2" aria-hidden="true" tabindex="-1"></a>  <span class="st">"S -&gt; I"</span> <span class="ot">=</span> infection,</span>
+<span id="cb9-3"><a href="#cb9-3" aria-hidden="true" tabindex="-1"></a>  <span class="st">"I -&gt; S"</span> <span class="ot">=</span> recovery)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</div>
+</div>
+<div id="tabset-5-2" class="tab-pane" role="tabpanel" aria-labelledby="tabset-5-2-tab">
+<div class="sourceCode" id="cb10"><pre class="sourceCode julia code-with-copy"><code class="sourceCode julia"><span id="cb10-1"><a href="#cb10-1" aria-hidden="true" tabindex="-1"></a>trans_mat <span class="op">=</span> <span class="pp">@transitions</span> state_space <span class="cf">begin</span></span>
+<span id="cb10-2"><a href="#cb10-2" aria-hidden="true" tabindex="-1"></a>    S <span class="op">-&gt;</span> I <span class="op">=</span> infection</span>
+<span id="cb10-3"><a href="#cb10-3" aria-hidden="true" tabindex="-1"></a>    I <span class="op">-&gt;</span> S <span class="op">=</span> recovery</span>
+<span id="cb10-4"><a href="#cb10-4" aria-hidden="true" tabindex="-1"></a><span class="cf">end</span></span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</div>
+</div>
+</div>
+<p>Two moves declared. The self-transitions (<code>S→S</code>, <code>I→I</code>) take whatever probability is left over, so the rows sum to one without your having to say so.</p>
+</section>
+<section id="where-an-animal-starts" class="level2">
+<h2 class="anchored" data-anchor-id="where-an-animal-starts">Where an animal starts</h2>
+<div class="tabset-margin-container"></div><div class="panel-tabset">
+<ul class="nav nav-tabs" role="tablist"><li class="nav-item" role="presentation"><a class="nav-link active" id="tabset-6-1-tab" data-bs-toggle="tab" data-bs-target="#tabset-6-1" role="tab" aria-controls="tabset-6-1" aria-selected="true" href="">R</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-6-2-tab" data-bs-toggle="tab" data-bs-target="#tabset-6-2" role="tab" aria-controls="tabset-6-2" aria-selected="false" href="">Julia</a></li></ul>
+<div class="tab-content">
+<div id="tabset-6-1" class="tab-pane active" role="tabpanel" aria-labelledby="tabset-6-1-tab">
+<div class="cell">
+<div class="sourceCode cell-code" id="cb11"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb11-1"><a href="#cb11-1" aria-hidden="true" tabindex="-1"></a>starting_state <span class="ot">&lt;-</span> <span class="cf">function</span>(model, data, X, i, t) {</span>
+<span id="cb11-2"><a href="#cb11-2" aria-hidden="true" tabindex="-1"></a>  p <span class="ot">&lt;-</span> <span class="fu">numeric</span>(data<span class="sc">$</span>n_states)</span>
+<span id="cb11-3"><a href="#cb11-3" aria-hidden="true" tabindex="-1"></a>  p[<span class="dv">1</span>] <span class="ot">&lt;-</span> <span class="dv">1</span> <span class="sc">-</span> model<span class="sc">$</span>nu</span>
+<span id="cb11-4"><a href="#cb11-4" aria-hidden="true" tabindex="-1"></a>  p[<span class="dv">2</span>] <span class="ot">&lt;-</span> model<span class="sc">$</span>nu</span>
+<span id="cb11-5"><a href="#cb11-5" aria-hidden="true" tabindex="-1"></a>  p</span>
+<span id="cb11-6"><a href="#cb11-6" aria-hidden="true" tabindex="-1"></a>}</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</div>
+</div>
+<div id="tabset-6-2" class="tab-pane" role="tabpanel" aria-labelledby="tabset-6-2-tab">
+<div class="sourceCode" id="cb12"><pre class="sourceCode julia code-with-copy"><code class="sourceCode julia"><span id="cb12-1"><a href="#cb12-1" aria-hidden="true" tabindex="-1"></a><span class="fu">starting_state</span>(model, data, X, i, t) <span class="op">=</span> [<span class="fl">1</span> <span class="op">-</span> model.ν, model.ν]</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</div>
+</div>
+</div>
+</section>
+<section id="what-we-observe" class="level2">
+<h2 class="anchored" data-anchor-id="what-we-observe">What we observe</h2>
+<p>Two imperfect tests, each with its own sensitivity and perfect specificity. A negative entry means the animal was not tested that day, so the result says nothing.</p>
+<p>The package knows none of this — it just multiplies these weights into the filter.</p>
+<div class="tabset-margin-container"></div><div class="panel-tabset">
+<ul class="nav nav-tabs" role="tablist"><li class="nav-item" role="presentation"><a class="nav-link active" id="tabset-7-1-tab" data-bs-toggle="tab" data-bs-target="#tabset-7-1" role="tab" aria-controls="tabset-7-1" aria-selected="true" href="">R</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-7-2-tab" data-bs-toggle="tab" data-bs-target="#tabset-7-2" role="tab" aria-controls="tabset-7-2" aria-selected="false" href="">Julia</a></li></ul>
+<div class="tab-content">
+<div id="tabset-7-1" class="tab-pane active" role="tabpanel" aria-labelledby="tabset-7-1-tab">
+<div class="cell">
+<div class="sourceCode cell-code" id="cb13"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb13-1"><a href="#cb13-1" aria-hidden="true" tabindex="-1"></a>cattle_observations <span class="ot">&lt;-</span> <span class="cf">function</span>(model, data, X, i, t) {</span>
+<span id="cb13-2"><a href="#cb13-2" aria-hidden="true" tabindex="-1"></a>  w <span class="ot">&lt;-</span> <span class="fu">rep</span>(<span class="dv">1</span>, data<span class="sc">$</span>n_states)</span>
+<span id="cb13-3"><a href="#cb13-3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb13-4"><a href="#cb13-4" aria-hidden="true" tabindex="-1"></a>  y <span class="ot">&lt;-</span> data<span class="sc">$</span>rams[t, i]</span>
+<span id="cb13-5"><a href="#cb13-5" aria-hidden="true" tabindex="-1"></a>  <span class="cf">if</span> (y <span class="sc">&gt;=</span> <span class="dv">0</span>) {</span>
+<span id="cb13-6"><a href="#cb13-6" aria-hidden="true" tabindex="-1"></a>    w[<span class="dv">1</span>] <span class="ot">&lt;-</span> w[<span class="dv">1</span>] <span class="sc">*</span> <span class="fu">ifelse</span>(y <span class="sc">==</span> <span class="dv">1</span>, <span class="dv">0</span>, <span class="dv">1</span>)                          <span class="co"># S never tests +</span></span>
+<span id="cb13-7"><a href="#cb13-7" aria-hidden="true" tabindex="-1"></a>    w[<span class="dv">2</span>] <span class="ot">&lt;-</span> w[<span class="dv">2</span>] <span class="sc">*</span> <span class="fu">ifelse</span>(y <span class="sc">==</span> <span class="dv">1</span>, model<span class="sc">$</span>theta_r, <span class="dv">1</span> <span class="sc">-</span> model<span class="sc">$</span>theta_r)</span>
+<span id="cb13-8"><a href="#cb13-8" aria-hidden="true" tabindex="-1"></a>  }</span>
+<span id="cb13-9"><a href="#cb13-9" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb13-10"><a href="#cb13-10" aria-hidden="true" tabindex="-1"></a>  y <span class="ot">&lt;-</span> data<span class="sc">$</span>faecal[t, i]</span>
+<span id="cb13-11"><a href="#cb13-11" aria-hidden="true" tabindex="-1"></a>  <span class="cf">if</span> (y <span class="sc">&gt;=</span> <span class="dv">0</span>) {</span>
+<span id="cb13-12"><a href="#cb13-12" aria-hidden="true" tabindex="-1"></a>    w[<span class="dv">1</span>] <span class="ot">&lt;-</span> w[<span class="dv">1</span>] <span class="sc">*</span> <span class="fu">ifelse</span>(y <span class="sc">==</span> <span class="dv">1</span>, <span class="dv">0</span>, <span class="dv">1</span>)</span>
+<span id="cb13-13"><a href="#cb13-13" aria-hidden="true" tabindex="-1"></a>    w[<span class="dv">2</span>] <span class="ot">&lt;-</span> w[<span class="dv">2</span>] <span class="sc">*</span> <span class="fu">ifelse</span>(y <span class="sc">==</span> <span class="dv">1</span>, model<span class="sc">$</span>theta_f, <span class="dv">1</span> <span class="sc">-</span> model<span class="sc">$</span>theta_f)</span>
+<span id="cb13-14"><a href="#cb13-14" aria-hidden="true" tabindex="-1"></a>  }</span>
+<span id="cb13-15"><a href="#cb13-15" aria-hidden="true" tabindex="-1"></a>  w</span>
+<span id="cb13-16"><a href="#cb13-16" aria-hidden="true" tabindex="-1"></a>}</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</div>
+</div>
+<div id="tabset-7-2" class="tab-pane" role="tabpanel" aria-labelledby="tabset-7-2-tab">
+<div class="sourceCode" id="cb14"><pre class="sourceCode julia code-with-copy"><code class="sourceCode julia"><span id="cb14-1"><a href="#cb14-1" aria-hidden="true" tabindex="-1"></a><span class="kw">function</span> <span class="fu">cattle_observations</span>(model, data, X, i, t)</span>
+<span id="cb14-2"><a href="#cb14-2" aria-hidden="true" tabindex="-1"></a>    w <span class="op">=</span> <span class="fu">ones</span>(<span class="fu">eltype</span>(model.θʳ), data.n_states)</span>
+<span id="cb14-3"><a href="#cb14-3" aria-hidden="true" tabindex="-1"></a>    <span class="cf">for</span> (results, θ) <span class="kw">in</span> ((data.rams, model.θʳ), (data.faecal, model.θᶠ))</span>
+<span id="cb14-4"><a href="#cb14-4" aria-hidden="true" tabindex="-1"></a>        y <span class="op">=</span> results[t, i]</span>
+<span id="cb14-5"><a href="#cb14-5" aria-hidden="true" tabindex="-1"></a>        y <span class="op">&lt;</span> <span class="fl">0</span> <span class="op">&amp;&amp;</span> <span class="cf">continue</span>                       <span class="co"># not tested</span></span>
+<span id="cb14-6"><a href="#cb14-6" aria-hidden="true" tabindex="-1"></a>        w[<span class="fl">1</span>] <span class="op">*=</span> y <span class="op">==</span> <span class="fl">1</span> ? <span class="fl">0.0</span> <span class="op">:</span> <span class="fl">1.0</span>              <span class="co"># S never tests positive</span></span>
+<span id="cb14-7"><a href="#cb14-7" aria-hidden="true" tabindex="-1"></a>        w[<span class="fl">2</span>] <span class="op">*=</span> y <span class="op">==</span> <span class="fl">1</span> ? θ <span class="op">:</span> (<span class="fl">1</span> <span class="op">-</span> θ)</span>
+<span id="cb14-8"><a href="#cb14-8" aria-hidden="true" tabindex="-1"></a>    <span class="cf">end</span></span>
+<span id="cb14-9"><a href="#cb14-9" aria-hidden="true" tabindex="-1"></a>    w</span>
+<span id="cb14-10"><a href="#cb14-10" aria-hidden="true" tabindex="-1"></a><span class="kw">end</span></span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</div>
+</div>
+</div>
+<div class="callout callout-style-default callout-note callout-titled">
+<div class="callout-header d-flex align-content-center">
+<div class="callout-icon-container">
+<i class="callout-icon"></i>
+</div>
+<div class="callout-title-container flex-fill">
+One thing worth knowing in both languages
+</div>
+</div>
+<div class="callout-body-container callout-body">
+<p><code>rep(1, data$n_states)</code> in R, and <code>ones(eltype(model.θʳ), ...)</code> in Julia, do the same job: allocate at the <strong>parameter’s</strong> scalar type rather than at <code>Float64</code>.</p>
+<p>This matters because that type depends on the <em>blocking</em>, not the model. When a test sensitivity is sampled conjugately it is a plain number; when it sits in an HMC block it is whatever the autodiff backend uses. Writing <code>zeros(Float64, ...)</code> works until someone moves a parameter between blocks, and then throws.</p>
+<p>In R the package handles it — <code>rep(1, n)</code> is translated appropriately. In Julia you write it yourself, which is why the idiom is <code>eltype(model.something)</code> rather than a literal type.</p>
+</div>
+</div>
+</section>
+<section id="assembling" class="level2">
+<h2 class="anchored" data-anchor-id="assembling">Assembling</h2>
+<div class="tabset-margin-container"></div><div class="panel-tabset">
+<ul class="nav nav-tabs" role="tablist"><li class="nav-item" role="presentation"><a class="nav-link active" id="tabset-8-1-tab" data-bs-toggle="tab" data-bs-target="#tabset-8-1" role="tab" aria-controls="tabset-8-1" aria-selected="true" href="">R</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-8-2-tab" data-bs-toggle="tab" data-bs-target="#tabset-8-2" role="tab" aria-controls="tabset-8-2" aria-selected="false" href="">Julia</a></li></ul>
+<div class="tab-content">
+<div id="tabset-8-1" class="tab-pane active" role="tabpanel" aria-labelledby="tabset-8-1-tab">
+<div class="cell">
+<div class="sourceCode cell-code" id="cb15"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb15-1"><a href="#cb15-1" aria-hidden="true" tabindex="-1"></a>dat <span class="ot">&lt;-</span> <span class="fu">et_data</span>(</span>
+<span id="cb15-2"><a href="#cb15-2" aria-hidden="true" tabindex="-1"></a>  <span class="at">n_individuals  =</span> n_individuals,</span>
+<span id="cb15-3"><a href="#cb15-3" aria-hidden="true" tabindex="-1"></a>  <span class="at">n_timepoints   =</span> n_timepoints,</span>
+<span id="cb15-4"><a href="#cb15-4" aria-hidden="true" tabindex="-1"></a>  <span class="at">transitions    =</span> trans,</span>
+<span id="cb15-5"><a href="#cb15-5" aria-hidden="true" tabindex="-1"></a>  <span class="at">starting_state =</span> starting_state,</span>
+<span id="cb15-6"><a href="#cb15-6" aria-hidden="true" tabindex="-1"></a>  <span class="at">aggregates     =</span> aggs,</span>
+<span id="cb15-7"><a href="#cb15-7" aria-hidden="true" tabindex="-1"></a>  <span class="at">group          =</span> group,</span>
+<span id="cb15-8"><a href="#cb15-8" aria-hidden="true" tabindex="-1"></a>  <span class="at">observation_process =</span> cattle_observations,</span>
+<span id="cb15-9"><a href="#cb15-9" aria-hidden="true" tabindex="-1"></a>  <span class="co"># your own data, reachable as data$rams / data$faecal above</span></span>
+<span id="cb15-10"><a href="#cb15-10" aria-hidden="true" tabindex="-1"></a>  <span class="at">extras =</span> <span class="fu">list</span>(<span class="at">rams =</span> rams, <span class="at">faecal =</span> faecal))</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</div>
+</div>
+<div id="tabset-8-2" class="tab-pane" role="tabpanel" aria-labelledby="tabset-8-2-tab">
+<div class="sourceCode" id="cb16"><pre class="sourceCode julia code-with-copy"><code class="sourceCode julia"><span id="cb16-1"><a href="#cb16-1" aria-hidden="true" tabindex="-1"></a>data <span class="op">=</span> <span class="fu">epidemic_data</span>(</span>
+<span id="cb16-2"><a href="#cb16-2" aria-hidden="true" tabindex="-1"></a>    n_individuals <span class="op">=</span> n_individuals,</span>
+<span id="cb16-3"><a href="#cb16-3" aria-hidden="true" tabindex="-1"></a>    n_timepoints  <span class="op">=</span> n_timepoints,</span>
+<span id="cb16-4"><a href="#cb16-4" aria-hidden="true" tabindex="-1"></a>    trans_mat     <span class="op">=</span> trans_mat,</span>
+<span id="cb16-5"><a href="#cb16-5" aria-hidden="true" tabindex="-1"></a>    starting_state <span class="op">=</span> starting_state,</span>
+<span id="cb16-6"><a href="#cb16-6" aria-hidden="true" tabindex="-1"></a>    aggregates    <span class="op">=</span> aggs,</span>
+<span id="cb16-7"><a href="#cb16-7" aria-hidden="true" tabindex="-1"></a>    group         <span class="op">=</span> group,</span>
+<span id="cb16-8"><a href="#cb16-8" aria-hidden="true" tabindex="-1"></a>    observation_process <span class="op">=</span> cattle_observations,</span>
+<span id="cb16-9"><a href="#cb16-9" aria-hidden="true" tabindex="-1"></a>    <span class="co"># your own data, reachable as data.rams / data.faecal above</span></span>
+<span id="cb16-10"><a href="#cb16-10" aria-hidden="true" tabindex="-1"></a>    rams <span class="op">=</span> Rmask, faecal <span class="op">=</span> Fmask)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</div>
+</div>
+</div>
+<p>Anything the package does not name is yours, and it never looks inside.</p>
+</section>
+<section id="parameters-and-priors" class="level2">
+<h2 class="anchored" data-anchor-id="parameters-and-priors">Parameters and priors</h2>
+<div class="tabset-margin-container"></div><div class="panel-tabset">
+<ul class="nav nav-tabs" role="tablist"><li class="nav-item" role="presentation"><a class="nav-link active" id="tabset-9-1-tab" data-bs-toggle="tab" data-bs-target="#tabset-9-1" role="tab" aria-controls="tabset-9-1" aria-selected="true" href="">R</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-9-2-tab" data-bs-toggle="tab" data-bs-target="#tabset-9-2" role="tab" aria-controls="tabset-9-2" aria-selected="false" href="">Julia</a></li></ul>
+<div class="tab-content">
+<div id="tabset-9-1" class="tab-pane active" role="tabpanel" aria-labelledby="tabset-9-1-tab">
+<div class="cell">
+<div class="sourceCode cell-code" id="cb17"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb17-1"><a href="#cb17-1" aria-hidden="true" tabindex="-1"></a>mod <span class="ot">&lt;-</span> <span class="fu">et_model</span>(</span>
+<span id="cb17-2"><a href="#cb17-2" aria-hidden="true" tabindex="-1"></a>  <span class="at">data =</span> dat,</span>
+<span id="cb17-3"><a href="#cb17-3" aria-hidden="true" tabindex="-1"></a>  <span class="at">parameters =</span> <span class="fu">list</span>(</span>
+<span id="cb17-4"><a href="#cb17-4" aria-hidden="true" tabindex="-1"></a>    <span class="at">alpha   =</span> <span class="fu">et_par</span>(<span class="fu">et_gamma</span>(<span class="dv">1</span>, <span class="dv">1</span>), <span class="at">init =</span> <span class="fl">0.05</span>),</span>
+<span id="cb17-5"><a href="#cb17-5" aria-hidden="true" tabindex="-1"></a>    <span class="at">beta    =</span> <span class="fu">et_par</span>(<span class="fu">et_gamma</span>(<span class="dv">1</span>, <span class="dv">1</span>), <span class="at">init =</span> <span class="fl">0.05</span>),</span>
+<span id="cb17-6"><a href="#cb17-6" aria-hidden="true" tabindex="-1"></a>    <span class="at">m_tilde =</span> <span class="fu">et_par</span>(<span class="fu">et_gamma</span>(<span class="dv">2</span>, <span class="dv">4</span>), <span class="at">init =</span> <span class="fl">4.0</span>),</span>
+<span id="cb17-7"><a href="#cb17-7" aria-hidden="true" tabindex="-1"></a>    <span class="at">nu      =</span> <span class="fu">et_par</span>(<span class="fu">et_beta</span>(<span class="dv">1</span>, <span class="dv">1</span>),  <span class="at">init =</span> <span class="fl">0.10</span>),</span>
+<span id="cb17-8"><a href="#cb17-8" aria-hidden="true" tabindex="-1"></a>    <span class="at">theta_r =</span> <span class="fu">et_par</span>(<span class="fu">et_beta</span>(<span class="dv">1</span>, <span class="dv">1</span>),  <span class="at">init =</span> <span class="fl">0.70</span>),</span>
+<span id="cb17-9"><a href="#cb17-9" aria-hidden="true" tabindex="-1"></a>    <span class="at">theta_f =</span> <span class="fu">et_par</span>(<span class="fu">et_beta</span>(<span class="dv">1</span>, <span class="dv">1</span>),  <span class="at">init =</span> <span class="fl">0.40</span>)),</span>
+<span id="cb17-10"><a href="#cb17-10" aria-hidden="true" tabindex="-1"></a>  <span class="co"># m = m_tilde + 1 keeps 1/m &lt; 1, so the recovery probability can never leave</span></span>
+<span id="cb17-11"><a href="#cb17-11" aria-hidden="true" tabindex="-1"></a>  <span class="co"># (0, 1) and send the sampler into a DomainError.</span></span>
+<span id="cb17-12"><a href="#cb17-12" aria-hidden="true" tabindex="-1"></a>  <span class="at">derived =</span> <span class="fu">list</span>(<span class="at">m =</span> <span class="fu">quote</span>(m_tilde <span class="sc">+</span> <span class="dv">1</span>)))</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</div>
+</div>
+<div id="tabset-9-2" class="tab-pane" role="tabpanel" aria-labelledby="tabset-9-2-tab">
+<div class="sourceCode" id="cb18"><pre class="sourceCode julia code-with-copy"><code class="sourceCode julia"><span id="cb18-1"><a href="#cb18-1" aria-hidden="true" tabindex="-1"></a><span class="pp">@model</span> <span class="kw">function</span> <span class="fu">cattle_model</span>(data, n_time, n_ind, loglik_fn, obs_loglik_fn)</span>
+<span id="cb18-2"><a href="#cb18-2" aria-hidden="true" tabindex="-1"></a>    α <span class="op">~</span> <span class="fu">Gamma</span>(<span class="fl">1</span>, <span class="fl">1</span>)</span>
+<span id="cb18-3"><a href="#cb18-3" aria-hidden="true" tabindex="-1"></a>    β <span class="op">~</span> <span class="fu">Gamma</span>(<span class="fl">1</span>, <span class="fl">1</span>)</span>
+<span id="cb18-4"><a href="#cb18-4" aria-hidden="true" tabindex="-1"></a>    m̃ <span class="op">~</span> <span class="fu">Gamma</span>(<span class="fl">2</span>, <span class="fl">4</span>)</span>
+<span id="cb18-5"><a href="#cb18-5" aria-hidden="true" tabindex="-1"></a>    m <span class="op">:=</span> m̃ <span class="op">+</span> <span class="fl">1.0</span>          <span class="co"># keeps 1/m &lt; 1</span></span>
+<span id="cb18-6"><a href="#cb18-6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb18-7"><a href="#cb18-7" aria-hidden="true" tabindex="-1"></a>    ν  <span class="op">~</span> <span class="fu">Beta</span>(<span class="fl">1</span>, <span class="fl">1</span>)</span>
+<span id="cb18-8"><a href="#cb18-8" aria-hidden="true" tabindex="-1"></a>    θʳ <span class="op">~</span> <span class="fu">Beta</span>(<span class="fl">1</span>, <span class="fl">1</span>)</span>
+<span id="cb18-9"><a href="#cb18-9" aria-hidden="true" tabindex="-1"></a>    θᶠ <span class="op">~</span> <span class="fu">Beta</span>(<span class="fl">1</span>, <span class="fl">1</span>)</span>
+<span id="cb18-10"><a href="#cb18-10" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb18-11"><a href="#cb18-11" aria-hidden="true" tabindex="-1"></a>    <span class="co"># The whole trajectory is ONE latent block: held constant during the</span></span>
+<span id="cb18-12"><a href="#cb18-12" aria-hidden="true" tabindex="-1"></a>    <span class="co"># gradients, resampled once per Gibbs sweep by iFFBS.</span></span>
+<span id="cb18-13"><a href="#cb18-13" aria-hidden="true" tabindex="-1"></a>    X <span class="op">~</span> <span class="fu">TrajectoryLatent</span>(n_time, n_ind)</span>
+<span id="cb18-14"><a href="#cb18-14" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb18-15"><a href="#cb18-15" aria-hidden="true" tabindex="-1"></a>    pars <span class="op">=</span> (; α, β, m, ν, θʳ, θᶠ)</span>
+<span id="cb18-16"><a href="#cb18-16" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb18-17"><a href="#cb18-17" aria-hidden="true" tabindex="-1"></a>    <span class="co"># BOTH halves. Omitting the observation term is a silent modelling bug:</span></span>
+<span id="cb18-18"><a href="#cb18-18" aria-hidden="true" tabindex="-1"></a>    <span class="co"># every test parameter would then be sampled from its prior.</span></span>
+<span id="cb18-19"><a href="#cb18-19" aria-hidden="true" tabindex="-1"></a>    <span class="pp">@addlogprob</span>! <span class="fu">loglik_fn</span>(pars, data, X) <span class="op">+</span> <span class="fu">obs_loglik_fn</span>(pars, data, X)</span>
+<span id="cb18-20"><a href="#cb18-20" aria-hidden="true" tabindex="-1"></a><span class="kw">end</span></span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</div>
+</div>
+</div>
+<div class="callout callout-style-default callout-important callout-titled">
+<div class="callout-header d-flex align-content-center">
+<div class="callout-icon-container">
+<i class="callout-icon"></i>
+</div>
+<div class="callout-title-container flex-fill">
+The likelihood has two halves and you need both
+</div>
+</div>
+<div class="callout-body-container callout-body">
+<p><code>epidemic_loglik</code> covers the starting state and the transitions. <code>epidemic_obs_loglik</code> covers the observation process. Neither includes the other.</p>
+<p>In Julia you write both terms yourself, and forgetting the second is a real bug that has shipped before: the observation process is used only by the filter, so every test parameter receives no likelihood information and is effectively sampled from its prior. The symptom is subtle — the parameters look prior-shaped — and there is no error.</p>
+<p>In R the package emits both whenever an observation process is given, and warns when one is not.</p>
+</div>
+</div>
+</section>
+<section id="the-sampler" class="level2">
+<h2 class="anchored" data-anchor-id="the-sampler">The sampler</h2>
+<div class="tabset-margin-container"></div><div class="panel-tabset">
+<ul class="nav nav-tabs" role="tablist"><li class="nav-item" role="presentation"><a class="nav-link active" id="tabset-10-1-tab" data-bs-toggle="tab" data-bs-target="#tabset-10-1" role="tab" aria-controls="tabset-10-1" aria-selected="true" href="">R</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-10-2-tab" data-bs-toggle="tab" data-bs-target="#tabset-10-2" role="tab" aria-controls="tabset-10-2" aria-selected="false" href="">Julia</a></li></ul>
+<div class="tab-content">
+<div id="tabset-10-1" class="tab-pane active" role="tabpanel" aria-labelledby="tabset-10-1-tab">
+<div class="cell">
+<div class="sourceCode cell-code" id="cb19"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb19-1"><a href="#cb19-1" aria-hidden="true" tabindex="-1"></a>fit <span class="ot">&lt;-</span> <span class="fu">et_sample</span>(mod,</span>
+<span id="cb19-2"><a href="#cb19-2" aria-hidden="true" tabindex="-1"></a>  <span class="at">blocks =</span> <span class="fu">list</span>(</span>
+<span id="cb19-3"><a href="#cb19-3" aria-hidden="true" tabindex="-1"></a>    <span class="fu">et_nuts</span>(<span class="fu">c</span>(<span class="st">"alpha"</span>, <span class="st">"beta"</span>, <span class="st">"m_tilde"</span>)),</span>
+<span id="cb19-4"><a href="#cb19-4" aria-hidden="true" tabindex="-1"></a>    <span class="co"># The initial infection frequency and the two test sensitivities have</span></span>
+<span id="cb19-5"><a href="#cb19-5" aria-hidden="true" tabindex="-1"></a>    <span class="co"># closed-form conditionals, so they get conjugate kernels rather than NUTS -</span></span>
+<span id="cb19-6"><a href="#cb19-6" aria-hidden="true" tabindex="-1"></a>    <span class="co"># an exact independent draw beats a correlated HMC step.</span></span>
+<span id="cb19-7"><a href="#cb19-7" aria-hidden="true" tabindex="-1"></a>    <span class="fu">et_conjugate_initial_state</span>(<span class="st">"nu"</span>, <span class="at">at =</span> <span class="dv">1</span>, <span class="at">states =</span> <span class="fu">c</span>(<span class="st">"S"</span>, <span class="st">"I"</span>)),</span>
+<span id="cb19-8"><a href="#cb19-8" aria-hidden="true" tabindex="-1"></a>    <span class="fu">et_conjugate_test_sensitivity</span>(<span class="st">"theta_r"</span>, <span class="at">y =</span> <span class="st">"rams"</span>,   <span class="at">infected_state =</span> <span class="st">"I"</span>),</span>
+<span id="cb19-9"><a href="#cb19-9" aria-hidden="true" tabindex="-1"></a>    <span class="fu">et_conjugate_test_sensitivity</span>(<span class="st">"theta_f"</span>, <span class="at">y =</span> <span class="st">"faecal"</span>, <span class="at">infected_state =</span> <span class="st">"I"</span>),</span>
+<span id="cb19-10"><a href="#cb19-10" aria-hidden="true" tabindex="-1"></a>    <span class="fu">et_iffbs</span>(<span class="st">"X"</span>)),</span>
+<span id="cb19-11"><a href="#cb19-11" aria-hidden="true" tabindex="-1"></a>  <span class="at">n_sweeps =</span> <span class="dv">2000</span>, <span class="at">n_burn =</span> <span class="dv">800</span>, <span class="at">n_adapts =</span> <span class="dv">400</span>, <span class="at">seed =</span> <span class="dv">7</span>,</span>
+<span id="cb19-12"><a href="#cb19-12" aria-hidden="true" tabindex="-1"></a>  <span class="at">x_init =</span> X_true)</span>
+<span id="cb19-13"><a href="#cb19-13" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb19-14"><a href="#cb19-14" aria-hidden="true" tabindex="-1"></a><span class="fu">summary</span>(fit)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</div>
+</div>
+<div id="tabset-10-2" class="tab-pane" role="tabpanel" aria-labelledby="tabset-10-2-tab">
+<div class="sourceCode" id="cb20"><pre class="sourceCode julia code-with-copy"><code class="sourceCode julia"><span id="cb20-1"><a href="#cb20-1" aria-hidden="true" tabindex="-1"></a>loglik     <span class="op">=</span> <span class="fu">epidemic_loglik</span>(data)</span>
+<span id="cb20-2"><a href="#cb20-2" aria-hidden="true" tabindex="-1"></a>obs_loglik <span class="op">=</span> <span class="fu">epidemic_obs_loglik</span>(data)</span>
+<span id="cb20-3"><a href="#cb20-3" aria-hidden="true" tabindex="-1"></a>latent!    <span class="op">=</span> <span class="fu">epidemic_latent_sampler</span>(data)</span>
+<span id="cb20-4"><a href="#cb20-4" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb20-5"><a href="#cb20-5" aria-hidden="true" tabindex="-1"></a>model <span class="op">=</span> <span class="fu">cattle_model</span>(data, n_timepoints, n_individuals, loglik, obs_loglik)</span>
+<span id="cb20-6"><a href="#cb20-6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb20-7"><a href="#cb20-7" aria-hidden="true" tabindex="-1"></a>spl <span class="op">=</span> <span class="fu">Gibbs</span>(</span>
+<span id="cb20-8"><a href="#cb20-8" aria-hidden="true" tabindex="-1"></a>    (<span class="op">:</span>α, <span class="op">:</span>β, <span class="op">:</span>m̃) <span class="op">=&gt;</span> <span class="fu">NUTS</span>(<span class="fl">0.8</span>),</span>
+<span id="cb20-9"><a href="#cb20-9" aria-hidden="true" tabindex="-1"></a>    <span class="op">:</span>ν  <span class="op">=&gt;</span> <span class="fu">initial_state_kernel</span>(<span class="op">:</span>ν; at <span class="op">=</span> <span class="fl">1</span>, eligible <span class="op">=</span> (X, d, i, t) <span class="op">-&gt;</span> <span class="cn">true</span>,</span>
+<span id="cb20-10"><a href="#cb20-10" aria-hidden="true" tabindex="-1"></a>                                states <span class="op">=</span> (<span class="fl">1</span>, <span class="fl">2</span>), prior <span class="op">=</span> [<span class="fl">1.0</span>, <span class="fl">1.0</span>]),</span>
+<span id="cb20-11"><a href="#cb20-11" aria-hidden="true" tabindex="-1"></a>    <span class="op">:</span>θʳ <span class="op">=&gt;</span> <span class="fu">test_sensitivity_kernel</span>(<span class="op">:</span>θʳ; Y <span class="op">=</span> Rmask, infected_state <span class="op">=</span> <span class="fl">2</span>),</span>
+<span id="cb20-12"><a href="#cb20-12" aria-hidden="true" tabindex="-1"></a>    <span class="op">:</span>θᶠ <span class="op">=&gt;</span> <span class="fu">test_sensitivity_kernel</span>(<span class="op">:</span>θᶠ; Y <span class="op">=</span> Fmask, infected_state <span class="op">=</span> <span class="fl">2</span>),</span>
+<span id="cb20-13"><a href="#cb20-13" aria-hidden="true" tabindex="-1"></a>    <span class="op">:</span>X  <span class="op">=&gt;</span> <span class="fu">iffbs_kernel</span>(latent!; params <span class="op">=</span> (<span class="op">:</span>α, <span class="op">:</span>β, <span class="op">:</span>m, <span class="op">:</span>ν, <span class="op">:</span>θʳ, <span class="op">:</span>θᶠ)),</span>
+<span id="cb20-14"><a href="#cb20-14" aria-hidden="true" tabindex="-1"></a>)</span>
+<span id="cb20-15"><a href="#cb20-15" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb20-16"><a href="#cb20-16" aria-hidden="true" tabindex="-1"></a><span class="co"># The aggregates must agree with the STARTING trajectory before the first</span></span>
+<span id="cb20-17"><a href="#cb20-17" aria-hidden="true" tabindex="-1"></a><span class="co"># likelihood call. Established once here; the sampler preserves it thereafter.</span></span>
+<span id="cb20-18"><a href="#cb20-18" aria-hidden="true" tabindex="-1"></a>X0 <span class="op">=</span> <span class="fu">copy</span>(X_true)</span>
+<span id="cb20-19"><a href="#cb20-19" aria-hidden="true" tabindex="-1"></a><span class="fu">reset_aggregates!</span>(data)</span>
+<span id="cb20-20"><a href="#cb20-20" aria-hidden="true" tabindex="-1"></a><span class="fu">apply_derived_summaries!</span>((;), data, X0)</span>
+<span id="cb20-21"><a href="#cb20-21" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb20-22"><a href="#cb20-22" aria-hidden="true" tabindex="-1"></a>chn <span class="op">=</span> AbstractMCMC.<span class="fu">sample</span>(<span class="fu">StableRNG</span>(<span class="fl">7</span>), model, spl, <span class="fl">2000</span>;</span>
+<span id="cb20-23"><a href="#cb20-23" aria-hidden="true" tabindex="-1"></a>                          init <span class="op">=</span> (; X <span class="op">=</span> X0), n_adapts <span class="op">=</span> <span class="fl">400</span>,</span>
+<span id="cb20-24"><a href="#cb20-24" aria-hidden="true" tabindex="-1"></a>                          discard_initial <span class="op">=</span> <span class="fl">800</span>,</span>
+<span id="cb20-25"><a href="#cb20-25" aria-hidden="true" tabindex="-1"></a>                          save_states <span class="op">=</span> (X <span class="op">=</span> <span class="op">:</span>buffer,))</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</div>
+</div>
+</div>
+<p>In R, <code>blocks</code> is optional: omit it and every parameter goes into one NUTS block with the trajectory sampled by iFFBS. It is spelled out here because the three conjugate kernels are worth having.</p>
+<div class="callout callout-style-default callout-note callout-titled">
+<div class="callout-header d-flex align-content-center" data-bs-toggle="collapse" data-bs-target=".callout-3-contents" aria-controls="callout-3" aria-expanded="false" aria-label="Toggle callout">
+<div class="callout-icon-container">
+<i class="callout-icon"></i>
+</div>
+<div class="callout-title-container flex-fill">
+Why the trajectory is one block
+</div>
+<div class="callout-btn-toggle d-inline-block border-0 py-1 ps-1 pe-0 float-end"><i class="callout-toggle"></i></div>
+</div>
+<div id="callout-3" class="callout-3-contents callout-collapse collapse">
+<div class="callout-body-container callout-body">
+<p>The hidden trajectory <code>X</code> is stored as a <strong>single whole-matrix latent</strong>, not as a family of indexed variables. That is what lets it be held constant during the gradient evaluations and resampled once per Gibbs sweep by iFFBS.</p>
+<p>It is also the reason this package exists. Written naively inside a model body, a latent-state sampler re-runs on <em>every</em> gradient call — expensive, and because the sampler is stochastic it makes the gradient itself stochastic, which can invalidate the inference outright.</p>
+</div>
+</div>
+</div>
+</section>
+<section id="results" class="level2">
+<h2 class="anchored" data-anchor-id="results">Results</h2>
+<p>Both versions recover the simulated truth. From the R run:</p>
+<pre><code>          mean     sd   2.5%    50%  97.5%
+alpha   0.0121 0.0032 0.0068 0.0117 0.0197
+beta    0.0190 0.0042 0.0117 0.0188 0.0279
+nu      0.1324 0.0423 0.0619 0.1286 0.2245
+theta_r 0.7328 0.0457 0.6404 0.7348 0.8156
+theta_f 0.4656 0.0428 0.3821 0.4653 0.5498
+m       6.2078 0.8380 4.7773 6.1505 8.0649</code></pre>
+<table class="caption-top table">
+<thead>
+<tr class="header">
+<th>parameter</th>
+<th>truth</th>
+<th>posterior mean</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><code>alpha</code></td>
+<td>0.01</td>
+<td>0.0121</td>
+</tr>
+<tr class="even">
+<td><code>beta</code></td>
+<td>0.02</td>
+<td>0.0190</td>
+</tr>
+<tr class="odd">
+<td><code>m</code></td>
+<td>6</td>
+<td>6.21</td>
+</tr>
+<tr class="even">
+<td><code>nu</code></td>
+<td>0.10</td>
+<td>0.132</td>
+</tr>
+<tr class="odd">
+<td><code>theta_r</code></td>
+<td>0.8</td>
+<td>0.733</td>
+</tr>
+<tr class="even">
+<td><code>theta_f</code></td>
+<td>0.5</td>
+<td>0.466</td>
+</tr>
+</tbody>
+</table>
+<p>All six within three standard errors, from 2000 sweeps in about 49 seconds — on data where the states are never directly observed.</p>
+</section>
+<section id="seeing-the-julia-from-r" class="level2">
+<h2 class="anchored" data-anchor-id="seeing-the-julia-from-r">Seeing the Julia from R</h2>
+<p>The generated module is a first-class artefact, not a hidden intermediate. It is commented, it runs standalone, and it is the on-ramp if you want to move a model from R to Julia.</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb22"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb22-1"><a href="#cb22-1" aria-hidden="true" tabindex="-1"></a><span class="fu">et_julia_source</span>(mod)   <span class="co"># print the module this model generates</span></span>
+<span id="cb22-2"><a href="#cb22-2" aria-hidden="true" tabindex="-1"></a><span class="fu">et_source</span>(fit)         <span class="co"># the module behind a fit</span></span>
+<span id="cb22-3"><a href="#cb22-3" aria-hidden="true" tabindex="-1"></a><span class="fu">et_eval</span>(<span class="st">"..."</span>)         <span class="co"># run anything in the session</span></span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</div>
+<p>That is how the two halves of this document relate: the R on the left generates something very close to the Julia on the right.</p>
+</section>
+<section id="where-to-go-next" class="level2">
+<h2 class="anchored" data-anchor-id="where-to-go-next">Where to go next</h2>
+<ul>
+<li><strong><a href="badger.qmd">The badger model</a></strong> — the same ideas at scale: 2384 individuals, four states, six tests, capture-recapture observation, survival, and the performance seams this document deliberately ignores.</li>
+<li><code>et_check_depends()</code> — verifies the dependency annotations that let each Gibbs block skip likelihood terms it cannot move.</li>
+<li><code>et_residuals()</code> — post-hoc PIT residuals for the mechanisms in your model, which is how you find out whether any of this fitted well.</li>
+</ul>
+<!-- -->
+
+</section>
+
+</main>
+<!-- /main column -->
+<script id="quarto-html-after-body" type="application/javascript">
+window.document.addEventListener("DOMContentLoaded", function (event) {
+  const toggleBodyColorMode = (bsSheetEl) => {
+    const mode = bsSheetEl.getAttribute("data-mode");
+    const bodyEl = window.document.querySelector("body");
+    if (mode === "dark") {
+      bodyEl.classList.add("quarto-dark");
+      bodyEl.classList.remove("quarto-light");
+    } else {
+      bodyEl.classList.add("quarto-light");
+      bodyEl.classList.remove("quarto-dark");
+    }
+  }
+  const toggleBodyColorPrimary = () => {
+    const bsSheetEl = window.document.querySelector("link#quarto-bootstrap");
+    if (bsSheetEl) {
+      toggleBodyColorMode(bsSheetEl);
+    }
+  }
+  toggleBodyColorPrimary();  
+  const icon = "";
+  const anchorJS = new window.AnchorJS();
+  anchorJS.options = {
+    placement: 'right',
+    icon: icon
+  };
+  anchorJS.add('.anchored');
+  const isCodeAnnotation = (el) => {
+    for (const clz of el.classList) {
+      if (clz.startsWith('code-annotation-')) {                     
+        return true;
+      }
+    }
+    return false;
+  }
+  const onCopySuccess = function(e) {
+    // button target
+    const button = e.trigger;
+    // don't keep focus
+    button.blur();
+    // flash "checked"
+    button.classList.add('code-copy-button-checked');
+    var currentTitle = button.getAttribute("title");
+    button.setAttribute("title", "Copied!");
+    let tooltip;
+    if (window.bootstrap) {
+      button.setAttribute("data-bs-toggle", "tooltip");
+      button.setAttribute("data-bs-placement", "left");
+      button.setAttribute("data-bs-title", "Copied!");
+      tooltip = new bootstrap.Tooltip(button, 
+        { trigger: "manual", 
+          customClass: "code-copy-button-tooltip",
+          offset: [0, -8]});
+      tooltip.show();    
+    }
+    setTimeout(function() {
+      if (tooltip) {
+        tooltip.hide();
+        button.removeAttribute("data-bs-title");
+        button.removeAttribute("data-bs-toggle");
+        button.removeAttribute("data-bs-placement");
+      }
+      button.setAttribute("title", currentTitle);
+      button.classList.remove('code-copy-button-checked');
+    }, 1000);
+    // clear code selection
+    e.clearSelection();
+  }
+  const getTextToCopy = function(trigger) {
+      const codeEl = trigger.previousElementSibling.cloneNode(true);
+      for (const childEl of codeEl.children) {
+        if (isCodeAnnotation(childEl)) {
+          childEl.remove();
+        }
+      }
+      return codeEl.innerText;
+  }
+  const clipboard = new window.ClipboardJS('.code-copy-button:not([data-in-quarto-modal])', {
+    text: getTextToCopy
+  });
+  clipboard.on('success', onCopySuccess);
+  if (window.document.getElementById('quarto-embedded-source-code-modal')) {
+    const clipboardModal = new window.ClipboardJS('.code-copy-button[data-in-quarto-modal]', {
+      text: getTextToCopy,
+      container: window.document.getElementById('quarto-embedded-source-code-modal')
+    });
+    clipboardModal.on('success', onCopySuccess);
+  }
+  const viewSource = window.document.getElementById('quarto-view-source') ||
+                     window.document.getElementById('quarto-code-tools-source');
+  if (viewSource) {
+    const sourceUrl = viewSource.getAttribute("data-quarto-source-url");
+    viewSource.addEventListener("click", function(e) {
+      if (sourceUrl) {
+        // rstudio viewer pane
+        if (/\bcapabilities=\b/.test(window.location)) {
+          window.open(sourceUrl);
+        } else {
+          window.location.href = sourceUrl;
+        }
+      } else {
+        const modal = new bootstrap.Modal(document.getElementById('quarto-embedded-source-code-modal'));
+        modal.show();
+      }
+      return false;
+    });
+  }
+  function toggleCodeHandler(show) {
+    return function(e) {
+      const detailsSrc = window.document.querySelectorAll(".cell > details > .sourceCode");
+      for (let i=0; i<detailsSrc.length; i++) {
+        const details = detailsSrc[i].parentElement;
+        if (show) {
+          details.open = true;
+        } else {
+          details.removeAttribute("open");
+        }
+      }
+      const cellCodeDivs = window.document.querySelectorAll(".cell > .sourceCode");
+      const fromCls = show ? "hidden" : "unhidden";
+      const toCls = show ? "unhidden" : "hidden";
+      for (let i=0; i<cellCodeDivs.length; i++) {
+        const codeDiv = cellCodeDivs[i];
+        if (codeDiv.classList.contains(fromCls)) {
+          codeDiv.classList.remove(fromCls);
+          codeDiv.classList.add(toCls);
+        } 
+      }
+      return false;
+    }
+  }
+  const hideAllCode = window.document.getElementById("quarto-hide-all-code");
+  if (hideAllCode) {
+    hideAllCode.addEventListener("click", toggleCodeHandler(false));
+  }
+  const showAllCode = window.document.getElementById("quarto-show-all-code");
+  if (showAllCode) {
+    showAllCode.addEventListener("click", toggleCodeHandler(true));
+  }
+    var localhostRegex = new RegExp(/^(?:http|https):\/\/localhost\:?[0-9]*\//);
+    var mailtoRegex = new RegExp(/^mailto:/);
+      var filterRegex = new RegExp('/' + window.location.host + '/');
+    var isInternal = (href) => {
+        return filterRegex.test(href) || localhostRegex.test(href) || mailtoRegex.test(href);
+    }
+    // Inspect non-navigation links and adorn them if external
+ 	var links = window.document.querySelectorAll('a[href]:not(.nav-link):not(.navbar-brand):not(.toc-action):not(.sidebar-link):not(.sidebar-item-toggle):not(.pagination-link):not(.no-external):not([aria-hidden]):not(.dropdown-item):not(.quarto-navigation-tool):not(.about-link)');
+    for (var i=0; i<links.length; i++) {
+      const link = links[i];
+      if (!isInternal(link.href)) {
+        // undo the damage that might have been done by quarto-nav.js in the case of
+        // links that we want to consider external
+        if (link.dataset.originalHref !== undefined) {
+          link.href = link.dataset.originalHref;
+        }
+      }
+    }
+  function tippyHover(el, contentFn, onTriggerFn, onUntriggerFn) {
+    const config = {
+      allowHTML: true,
+      maxWidth: 500,
+      delay: 100,
+      arrow: false,
+      appendTo: function(el) {
+          return el.parentElement;
+      },
+      interactive: true,
+      interactiveBorder: 10,
+      theme: 'quarto',
+      placement: 'bottom-start',
+    };
+    if (contentFn) {
+      config.content = contentFn;
+    }
+    if (onTriggerFn) {
+      config.onTrigger = onTriggerFn;
+    }
+    if (onUntriggerFn) {
+      config.onUntrigger = onUntriggerFn;
+    }
+    window.tippy(el, config); 
+  }
+  const noterefs = window.document.querySelectorAll('a[role="doc-noteref"]');
+  for (var i=0; i<noterefs.length; i++) {
+    const ref = noterefs[i];
+    tippyHover(ref, function() {
+      // use id or data attribute instead here
+      let href = ref.getAttribute('data-footnote-href') || ref.getAttribute('href');
+      try { href = new URL(href).hash; } catch {}
+      const id = href.replace(/^#\/?/, "");
+      const note = window.document.getElementById(id);
+      if (note) {
+        return note.innerHTML;
+      } else {
+        return "";
+      }
+    });
+  }
+  const xrefs = window.document.querySelectorAll('a.quarto-xref');
+  const processXRef = (id, note) => {
+    // Strip column container classes
+    const stripColumnClz = (el) => {
+      el.classList.remove("page-full", "page-columns");
+      if (el.children) {
+        for (const child of el.children) {
+          stripColumnClz(child);
+        }
+      }
+    }
+    stripColumnClz(note)
+    if (id === null || id.startsWith('sec-')) {
+      // Special case sections, only their first couple elements
+      const container = document.createElement("div");
+      if (note.children && note.children.length > 2) {
+        container.appendChild(note.children[0].cloneNode(true));
+        for (let i = 1; i < note.children.length; i++) {
+          const child = note.children[i];
+          if (child.tagName === "P" && child.innerText === "") {
+            continue;
+          } else {
+            container.appendChild(child.cloneNode(true));
+            break;
+          }
+        }
+        if (window.Quarto?.typesetMath) {
+          window.Quarto.typesetMath(container);
+        }
+        return container.innerHTML
+      } else {
+        if (window.Quarto?.typesetMath) {
+          window.Quarto.typesetMath(note);
+        }
+        return note.innerHTML;
+      }
+    } else {
+      // Remove any anchor links if they are present
+      const anchorLink = note.querySelector('a.anchorjs-link');
+      if (anchorLink) {
+        anchorLink.remove();
+      }
+      if (window.Quarto?.typesetMath) {
+        window.Quarto.typesetMath(note);
+      }
+      if (note.classList.contains("callout")) {
+        return note.outerHTML;
+      } else {
+        return note.innerHTML;
+      }
+    }
+  }
+  for (var i=0; i<xrefs.length; i++) {
+    const xref = xrefs[i];
+    tippyHover(xref, undefined, function(instance) {
+      instance.disable();
+      let url = xref.getAttribute('href');
+      let hash = undefined; 
+      if (url.startsWith('#')) {
+        hash = url;
+      } else {
+        try { hash = new URL(url).hash; } catch {}
+      }
+      if (hash) {
+        const id = hash.replace(/^#\/?/, "");
+        const note = window.document.getElementById(id);
+        if (note !== null) {
+          try {
+            const html = processXRef(id, note.cloneNode(true));
+            instance.setContent(html);
+          } finally {
+            instance.enable();
+            instance.show();
+          }
+        } else {
+          // See if we can fetch this
+          fetch(url.split('#')[0])
+          .then(res => res.text())
+          .then(html => {
+            const parser = new DOMParser();
+            const htmlDoc = parser.parseFromString(html, "text/html");
+            const note = htmlDoc.getElementById(id);
+            if (note !== null) {
+              const html = processXRef(id, note);
+              instance.setContent(html);
+            } 
+          }).finally(() => {
+            instance.enable();
+            instance.show();
+          });
+        }
+      } else {
+        // See if we can fetch a full url (with no hash to target)
+        // This is a special case and we should probably do some content thinning / targeting
+        fetch(url)
+        .then(res => res.text())
+        .then(html => {
+          const parser = new DOMParser();
+          const htmlDoc = parser.parseFromString(html, "text/html");
+          const note = htmlDoc.querySelector('main.content');
+          if (note !== null) {
+            // This should only happen for chapter cross references
+            // (since there is no id in the URL)
+            // remove the first header
+            if (note.children.length > 0 && note.children[0].tagName === "HEADER") {
+              note.children[0].remove();
+            }
+            const html = processXRef(null, note);
+            instance.setContent(html);
+          } 
+        }).finally(() => {
+          instance.enable();
+          instance.show();
+        });
+      }
+    }, function(instance) {
+    });
+  }
+      let selectedAnnoteEl;
+      const selectorForAnnotation = ( cell, annotation) => {
+        let cellAttr = 'data-code-cell="' + cell + '"';
+        let lineAttr = 'data-code-annotation="' +  annotation + '"';
+        const selector = 'span[' + cellAttr + '][' + lineAttr + ']';
+        return selector;
+      }
+      const selectCodeLines = (annoteEl) => {
+        const doc = window.document;
+        const targetCell = annoteEl.getAttribute("data-target-cell");
+        const targetAnnotation = annoteEl.getAttribute("data-target-annotation");
+        const annoteSpan = window.document.querySelector(selectorForAnnotation(targetCell, targetAnnotation));
+        const lines = annoteSpan.getAttribute("data-code-lines").split(",");
+        const lineIds = lines.map((line) => {
+          return targetCell + "-" + line;
+        })
+        let top = null;
+        let height = null;
+        let parent = null;
+        if (lineIds.length > 0) {
+            //compute the position of the single el (top and bottom and make a div)
+            const el = window.document.getElementById(lineIds[0]);
+            top = el.offsetTop;
+            height = el.offsetHeight;
+            parent = el.parentElement.parentElement;
+          if (lineIds.length > 1) {
+            const lastEl = window.document.getElementById(lineIds[lineIds.length - 1]);
+            const bottom = lastEl.offsetTop + lastEl.offsetHeight;
+            height = bottom - top;
+          }
+          if (top !== null && height !== null && parent !== null) {
+            // cook up a div (if necessary) and position it 
+            let div = window.document.getElementById("code-annotation-line-highlight");
+            if (div === null) {
+              div = window.document.createElement("div");
+              div.setAttribute("id", "code-annotation-line-highlight");
+              div.style.position = 'absolute';
+              parent.appendChild(div);
+            }
+            div.style.top = top - 2 + "px";
+            div.style.height = height + 4 + "px";
+            div.style.left = 0;
+            let gutterDiv = window.document.getElementById("code-annotation-line-highlight-gutter");
+            if (gutterDiv === null) {
+              gutterDiv = window.document.createElement("div");
+              gutterDiv.setAttribute("id", "code-annotation-line-highlight-gutter");
+              gutterDiv.style.position = 'absolute';
+              const codeCell = window.document.getElementById(targetCell);
+              const gutter = codeCell.querySelector('.code-annotation-gutter');
+              gutter.appendChild(gutterDiv);
+            }
+            gutterDiv.style.top = top - 2 + "px";
+            gutterDiv.style.height = height + 4 + "px";
+          }
+          selectedAnnoteEl = annoteEl;
+        }
+      };
+      const unselectCodeLines = () => {
+        const elementsIds = ["code-annotation-line-highlight", "code-annotation-line-highlight-gutter"];
+        elementsIds.forEach((elId) => {
+          const div = window.document.getElementById(elId);
+          if (div) {
+            div.remove();
+          }
+        });
+        selectedAnnoteEl = undefined;
+      };
+        // Handle positioning of the toggle
+    window.addEventListener(
+      "resize",
+      throttle(() => {
+        elRect = undefined;
+        if (selectedAnnoteEl) {
+          selectCodeLines(selectedAnnoteEl);
+        }
+      }, 10)
+    );
+    function throttle(fn, ms) {
+    let throttle = false;
+    let timer;
+      return (...args) => {
+        if(!throttle) { // first call gets through
+            fn.apply(this, args);
+            throttle = true;
+        } else { // all the others get throttled
+            if(timer) clearTimeout(timer); // cancel #2
+            timer = setTimeout(() => {
+              fn.apply(this, args);
+              timer = throttle = false;
+            }, ms);
+        }
+      };
+    }
+      // Attach click handler to the DT
+      const annoteDls = window.document.querySelectorAll('dt[data-target-cell]');
+      for (const annoteDlNode of annoteDls) {
+        annoteDlNode.addEventListener('click', (event) => {
+          const clickedEl = event.target;
+          if (clickedEl !== selectedAnnoteEl) {
+            unselectCodeLines();
+            const activeEl = window.document.querySelector('dt[data-target-cell].code-annotation-active');
+            if (activeEl) {
+              activeEl.classList.remove('code-annotation-active');
+            }
+            selectCodeLines(clickedEl);
+            clickedEl.classList.add('code-annotation-active');
+          } else {
+            // Unselect the line
+            unselectCodeLines();
+            clickedEl.classList.remove('code-annotation-active');
+          }
+        });
+      }
+  const findCites = (el) => {
+    const parentEl = el.parentElement;
+    if (parentEl) {
+      const cites = parentEl.dataset.cites;
+      if (cites) {
+        return {
+          el,
+          cites: cites.split(' ')
+        };
+      } else {
+        return findCites(el.parentElement)
+      }
+    } else {
+      return undefined;
+    }
+  };
+  var bibliorefs = window.document.querySelectorAll('a[role="doc-biblioref"]');
+  for (var i=0; i<bibliorefs.length; i++) {
+    const ref = bibliorefs[i];
+    const citeInfo = findCites(ref);
+    if (citeInfo) {
+      tippyHover(citeInfo.el, function() {
+        var popup = window.document.createElement('div');
+        citeInfo.cites.forEach(function(cite) {
+          var citeDiv = window.document.createElement('div');
+          citeDiv.classList.add('hanging-indent');
+          citeDiv.classList.add('csl-entry');
+          var biblioDiv = window.document.getElementById('ref-' + cite);
+          if (biblioDiv) {
+            citeDiv.innerHTML = biblioDiv.innerHTML;
+          }
+          popup.appendChild(citeDiv);
+        });
+        return popup.innerHTML;
+      });
+    }
+  }
+});
+</script><div class="modal fade" id="quarto-embedded-source-code-modal" tabindex="-1" aria-labelledby="quarto-embedded-source-code-modal-label" aria-hidden="true"><div class="modal-dialog modal-dialog-scrollable"><div class="modal-content"><div class="modal-header"><h5 class="modal-title" id="quarto-embedded-source-code-modal-label">Source Code</h5><button class="btn-close" data-bs-dismiss="modal"></button></div><div class="modal-body"><div class="">
+<div class="sourceCode" id="cb23" data-shortcodes="false"><pre class="sourceCode markdown code-with-copy"><code class="sourceCode markdown"><span id="cb23-1"><a href="#cb23-1" aria-hidden="true" tabindex="-1"></a><span class="co">---</span></span>
+<span id="cb23-2"><a href="#cb23-2" aria-hidden="true" tabindex="-1"></a><span class="an">title:</span><span class="co"> "A cattle E. coli model, in R and in Julia"</span></span>
+<span id="cb23-3"><a href="#cb23-3" aria-hidden="true" tabindex="-1"></a><span class="an">subtitle:</span><span class="co"> "The same model written both ways, side by side"</span></span>
+<span id="cb23-4"><a href="#cb23-4" aria-hidden="true" tabindex="-1"></a><span class="an">format:</span></span>
+<span id="cb23-5"><a href="#cb23-5" aria-hidden="true" tabindex="-1"></a><span class="co">  html:</span></span>
+<span id="cb23-6"><a href="#cb23-6" aria-hidden="true" tabindex="-1"></a><span class="co">    toc: true</span></span>
+<span id="cb23-7"><a href="#cb23-7" aria-hidden="true" tabindex="-1"></a><span class="co">    toc-depth: 3</span></span>
+<span id="cb23-8"><a href="#cb23-8" aria-hidden="true" tabindex="-1"></a><span class="co">    code-fold: false</span></span>
+<span id="cb23-9"><a href="#cb23-9" aria-hidden="true" tabindex="-1"></a><span class="co">    code-tools: true</span></span>
+<span id="cb23-10"><a href="#cb23-10" aria-hidden="true" tabindex="-1"></a><span class="co">    df-print: kable</span></span>
+<span id="cb23-11"><a href="#cb23-11" aria-hidden="true" tabindex="-1"></a><span class="co">    theme: cosmo</span></span>
+<span id="cb23-12"><a href="#cb23-12" aria-hidden="true" tabindex="-1"></a><span class="an">execute:</span></span>
+<span id="cb23-13"><a href="#cb23-13" aria-hidden="true" tabindex="-1"></a><span class="co">  eval: false</span></span>
+<span id="cb23-14"><a href="#cb23-14" aria-hidden="true" tabindex="-1"></a><span class="co">  echo: true</span></span>
+<span id="cb23-15"><a href="#cb23-15" aria-hidden="true" tabindex="-1"></a><span class="co">  warning: false</span></span>
+<span id="cb23-16"><a href="#cb23-16" aria-hidden="true" tabindex="-1"></a><span class="an">knitr:</span></span>
+<span id="cb23-17"><a href="#cb23-17" aria-hidden="true" tabindex="-1"></a><span class="co">  opts_chunk:</span></span>
+<span id="cb23-18"><a href="#cb23-18" aria-hidden="true" tabindex="-1"></a><span class="co">    comment: "#&gt;"</span></span>
+<span id="cb23-19"><a href="#cb23-19" aria-hidden="true" tabindex="-1"></a><span class="co">---</span></span>
+<span id="cb23-20"><a href="#cb23-20" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb23-21"><a href="#cb23-21" aria-hidden="true" tabindex="-1"></a><span class="fu">## What this document is</span></span>
+<span id="cb23-22"><a href="#cb23-22" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb23-23"><a href="#cb23-23" aria-hidden="true" tabindex="-1"></a>One small model, written twice: once in R, once in Julia. Every code block below</span>
+<span id="cb23-24"><a href="#cb23-24" aria-hidden="true" tabindex="-1"></a>has both, and **the tabs are the same model** — pick whichever language you work</span>
+<span id="cb23-25"><a href="#cb23-25" aria-hidden="true" tabindex="-1"></a>in.</span>
+<span id="cb23-26"><a href="#cb23-26" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb23-27"><a href="#cb23-27" aria-hidden="true" tabindex="-1"></a>The point is not that the two look similar (they do), but that the *shape* of the</span>
+<span id="cb23-28"><a href="#cb23-28" aria-hidden="true" tabindex="-1"></a>specification is identical. If you learn it in one language you have learned it</span>
+<span id="cb23-29"><a href="#cb23-29" aria-hidden="true" tabindex="-1"></a>in the other, and a model prototyped in R can graduate to Julia without being</span>
+<span id="cb23-30"><a href="#cb23-30" aria-hidden="true" tabindex="-1"></a>rethought.</span>
+<span id="cb23-31"><a href="#cb23-31" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb23-32"><a href="#cb23-32" aria-hidden="true" tabindex="-1"></a>The model is deliberately small and readable. Where the badger document</span>
+<span id="cb23-33"><a href="#cb23-33" aria-hidden="true" tabindex="-1"></a>optimises, this one does not: it is about how little you have to write.</span>
+<span id="cb23-34"><a href="#cb23-34" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb23-35"><a href="#cb23-35" aria-hidden="true" tabindex="-1"></a><span class="fu">### The model</span></span>
+<span id="cb23-36"><a href="#cb23-36" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb23-37"><a href="#cb23-37" aria-hidden="true" tabindex="-1"></a>Two states, <span class="in">`S`</span> and <span class="in">`I`</span>, with recurrent <span class="in">`S ⇄ I`</span>. An animal is infected at a rate</span>
+<span id="cb23-38"><a href="#cb23-38" aria-hidden="true" tabindex="-1"></a>driven by how many of its penmates are infected, and recovers back to</span>
+<span id="cb23-39"><a href="#cb23-39" aria-hidden="true" tabindex="-1"></a>susceptible.</span>
+<span id="cb23-40"><a href="#cb23-40" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb23-41"><a href="#cb23-41" aria-hidden="true" tabindex="-1"></a>Neither state is ever observed. All we see are two imperfect diagnostic tests,</span>
+<span id="cb23-42"><a href="#cb23-42" aria-hidden="true" tabindex="-1"></a>on a subset of days — so the trajectory is entirely latent, and inferring it is</span>
+<span id="cb23-43"><a href="#cb23-43" aria-hidden="true" tabindex="-1"></a>the whole problem.</span>
+<span id="cb23-44"><a href="#cb23-44" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb23-45"><a href="#cb23-45" aria-hidden="true" tabindex="-1"></a>This is the E. coli cattle model of Touloupou et al. (2019).</span>
+<span id="cb23-46"><a href="#cb23-46" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb23-47"><a href="#cb23-47" aria-hidden="true" tabindex="-1"></a><span class="fu">## Setting up</span></span>
+<span id="cb23-48"><a href="#cb23-48" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb23-49"><a href="#cb23-49" aria-hidden="true" tabindex="-1"></a>::: {.panel-tabset}</span>
+<span id="cb23-50"><a href="#cb23-50" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb23-51"><a href="#cb23-51" aria-hidden="true" tabindex="-1"></a><span class="fu">### R</span></span>
+<span id="cb23-52"><a href="#cb23-52" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb23-55"><a href="#cb23-55" aria-hidden="true" tabindex="-1"></a><span class="in">```{r}</span></span>
+<span id="cb23-56"><a href="#cb23-56" aria-hidden="true" tabindex="-1"></a><span class="co">#| eval: false</span></span>
+<span id="cb23-57"><a href="#cb23-57" aria-hidden="true" tabindex="-1"></a><span class="co"># install.packages("remotes")</span></span>
+<span id="cb23-58"><a href="#cb23-58" aria-hidden="true" tabindex="-1"></a>remotes<span class="sc">::</span><span class="fu">install_github</span>(<span class="st">"EvoArt/EpidemicTrajectoriesR"</span>)</span>
+<span id="cb23-59"><a href="#cb23-59" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb23-60"><a href="#cb23-60" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(EpidemicTrajectoriesR)</span>
+<span id="cb23-61"><a href="#cb23-61" aria-hidden="true" tabindex="-1"></a><span class="fu">et_setup</span>()      <span class="co"># starts Julia and resolves its dependencies on first use</span></span>
+<span id="cb23-62"><a href="#cb23-62" aria-hidden="true" tabindex="-1"></a><span class="in">```</span></span>
+<span id="cb23-63"><a href="#cb23-63" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb23-64"><a href="#cb23-64" aria-hidden="true" tabindex="-1"></a><span class="fu">### Julia</span></span>
+<span id="cb23-65"><a href="#cb23-65" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb23-66"><a href="#cb23-66" aria-hidden="true" tabindex="-1"></a><span class="in">```julia</span></span>
+<span id="cb23-67"><a href="#cb23-67" aria-hidden="true" tabindex="-1"></a><span class="im">using</span> <span class="bu">Pkg</span></span>
+<span id="cb23-68"><a href="#cb23-68" aria-hidden="true" tabindex="-1"></a><span class="bu">Pkg</span>.<span class="fu">add</span>(url <span class="op">=</span> <span class="st">"https://github.com/EvoArt/EpidemicTrajectories.jl"</span>)</span>
+<span id="cb23-69"><a href="#cb23-69" aria-hidden="true" tabindex="-1"></a><span class="bu">Pkg</span>.<span class="fu">add</span>(url <span class="op">=</span> <span class="st">"https://github.com/EvoArt/PracticalBayes.jl"</span>)</span>
+<span id="cb23-70"><a href="#cb23-70" aria-hidden="true" tabindex="-1"></a><span class="bu">Pkg</span>.<span class="fu">add</span>(url <span class="op">=</span> <span class="st">"https://github.com/EvoArt/PracticalEpiBayes.jl"</span>)</span>
+<span id="cb23-71"><a href="#cb23-71" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb23-72"><a href="#cb23-72" aria-hidden="true" tabindex="-1"></a><span class="im">using</span> <span class="bu">EpidemicTrajectories</span>, <span class="bu">PracticalBayes</span>, <span class="bu">PracticalEpiBayes</span></span>
+<span id="cb23-73"><a href="#cb23-73" aria-hidden="true" tabindex="-1"></a><span class="im">using</span> <span class="bu">Distributions</span>, <span class="bu">Random</span>, <span class="bu">StableRNGs</span></span>
+<span id="cb23-74"><a href="#cb23-74" aria-hidden="true" tabindex="-1"></a><span class="im">import</span> <span class="bu">AbstractMCMC</span></span>
+<span id="cb23-75"><a href="#cb23-75" aria-hidden="true" tabindex="-1"></a><span class="in">```</span></span>
+<span id="cb23-76"><a href="#cb23-76" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb23-77"><a href="#cb23-77" aria-hidden="true" tabindex="-1"></a>:::</span>
+<span id="cb23-78"><a href="#cb23-78" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb23-79"><a href="#cb23-79" aria-hidden="true" tabindex="-1"></a><span class="fu">## The problem size</span></span>
+<span id="cb23-80"><a href="#cb23-80" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb23-81"><a href="#cb23-81" aria-hidden="true" tabindex="-1"></a>::: {.panel-tabset}</span>
+<span id="cb23-82"><a href="#cb23-82" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb23-83"><a href="#cb23-83" aria-hidden="true" tabindex="-1"></a><span class="fu">### R</span></span>
+<span id="cb23-84"><a href="#cb23-84" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb23-87"><a href="#cb23-87" aria-hidden="true" tabindex="-1"></a><span class="in">```{r}</span></span>
+<span id="cb23-88"><a href="#cb23-88" aria-hidden="true" tabindex="-1"></a><span class="co">#| label: size-r</span></span>
+<span id="cb23-89"><a href="#cb23-89" aria-hidden="true" tabindex="-1"></a>n_pens        <span class="ot">&lt;-</span> <span class="dv">10</span></span>
+<span id="cb23-90"><a href="#cb23-90" aria-hidden="true" tabindex="-1"></a>n_per_pen     <span class="ot">&lt;-</span> <span class="dv">8</span></span>
+<span id="cb23-91"><a href="#cb23-91" aria-hidden="true" tabindex="-1"></a>n_timepoints  <span class="ot">&lt;-</span> <span class="dv">80</span></span>
+<span id="cb23-92"><a href="#cb23-92" aria-hidden="true" tabindex="-1"></a>n_individuals <span class="ot">&lt;-</span> n_pens <span class="sc">*</span> n_per_pen</span>
+<span id="cb23-93"><a href="#cb23-93" aria-hidden="true" tabindex="-1"></a>group         <span class="ot">&lt;-</span> <span class="fu">rep</span>(<span class="fu">seq_len</span>(n_pens), <span class="at">each =</span> n_per_pen)</span>
+<span id="cb23-94"><a href="#cb23-94" aria-hidden="true" tabindex="-1"></a>observed_days <span class="ot">&lt;-</span> <span class="fu">seq</span>(<span class="dv">1</span>, n_timepoints, <span class="at">by =</span> <span class="dv">6</span>)</span>
+<span id="cb23-95"><a href="#cb23-95" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb23-96"><a href="#cb23-96" aria-hidden="true" tabindex="-1"></a>states <span class="ot">&lt;-</span> <span class="fu">c</span>(<span class="st">"S"</span>, <span class="st">"I"</span>)</span>
+<span id="cb23-97"><a href="#cb23-97" aria-hidden="true" tabindex="-1"></a><span class="in">```</span></span>
+<span id="cb23-98"><a href="#cb23-98" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb23-99"><a href="#cb23-99" aria-hidden="true" tabindex="-1"></a><span class="fu">### Julia</span></span>
+<span id="cb23-100"><a href="#cb23-100" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb23-101"><a href="#cb23-101" aria-hidden="true" tabindex="-1"></a><span class="in">```julia</span></span>
+<span id="cb23-102"><a href="#cb23-102" aria-hidden="true" tabindex="-1"></a>n_pens        <span class="op">=</span> <span class="fl">10</span></span>
+<span id="cb23-103"><a href="#cb23-103" aria-hidden="true" tabindex="-1"></a>n_per_pen     <span class="op">=</span> <span class="fl">8</span></span>
+<span id="cb23-104"><a href="#cb23-104" aria-hidden="true" tabindex="-1"></a>n_timepoints  <span class="op">=</span> <span class="fl">80</span></span>
+<span id="cb23-105"><a href="#cb23-105" aria-hidden="true" tabindex="-1"></a>n_individuals <span class="op">=</span> n_pens <span class="op">*</span> n_per_pen</span>
+<span id="cb23-106"><a href="#cb23-106" aria-hidden="true" tabindex="-1"></a>group         <span class="op">=</span> <span class="fu">repeat</span>(<span class="fl">1</span><span class="op">:</span>n_pens; inner <span class="op">=</span> n_per_pen)</span>
+<span id="cb23-107"><a href="#cb23-107" aria-hidden="true" tabindex="-1"></a>observed_days <span class="op">=</span> <span class="fu">collect</span>(<span class="fl">1</span><span class="op">:</span><span class="fl">6</span><span class="op">:</span>n_timepoints)</span>
+<span id="cb23-108"><a href="#cb23-108" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb23-109"><a href="#cb23-109" aria-hidden="true" tabindex="-1"></a>state_space <span class="op">=</span> [<span class="op">:</span>S, <span class="op">:</span>I]</span>
+<span id="cb23-110"><a href="#cb23-110" aria-hidden="true" tabindex="-1"></a><span class="in">```</span></span>
+<span id="cb23-111"><a href="#cb23-111" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb23-112"><a href="#cb23-112" aria-hidden="true" tabindex="-1"></a>:::</span>
+<span id="cb23-113"><a href="#cb23-113" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb23-114"><a href="#cb23-114" aria-hidden="true" tabindex="-1"></a>Declaring the state space fixes the numbering, so you and the package agree on</span>
+<span id="cb23-115"><a href="#cb23-115" aria-hidden="true" tabindex="-1"></a>which state is which: <span class="in">`S`</span> is 1, <span class="in">`I`</span> is 2.</span>
+<span id="cb23-116"><a href="#cb23-116" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb23-117"><a href="#cb23-117" aria-hidden="true" tabindex="-1"></a><span class="fu">## What to track</span></span>
+<span id="cb23-118"><a href="#cb23-118" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb23-119"><a href="#cb23-119" aria-hidden="true" tabindex="-1"></a>The force of infection needs to know how many penmates are infected. Declare the</span>
+<span id="cb23-120"><a href="#cb23-120" aria-hidden="true" tabindex="-1"></a>array and how it updates; the package allocates it and keeps it in step with the</span>
+<span id="cb23-121"><a href="#cb23-121" aria-hidden="true" tabindex="-1"></a>trajectory.</span>
+<span id="cb23-122"><a href="#cb23-122" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb23-123"><a href="#cb23-123" aria-hidden="true" tabindex="-1"></a>It needs the *update* rather than just the array because the sampler must be</span>
+<span id="cb23-124"><a href="#cb23-124" aria-hidden="true" tabindex="-1"></a>able to take one animal's contribution back out, resample it, and put it back —</span>
+<span id="cb23-125"><a href="#cb23-125" aria-hidden="true" tabindex="-1"></a>which is what gives each animal the leave-one-out count its force of infection</span>
+<span id="cb23-126"><a href="#cb23-126" aria-hidden="true" tabindex="-1"></a>wants.</span>
+<span id="cb23-127"><a href="#cb23-127" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb23-128"><a href="#cb23-128" aria-hidden="true" tabindex="-1"></a>::: {.panel-tabset}</span>
+<span id="cb23-129"><a href="#cb23-129" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb23-130"><a href="#cb23-130" aria-hidden="true" tabindex="-1"></a><span class="fu">### R</span></span>
+<span id="cb23-131"><a href="#cb23-131" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb23-134"><a href="#cb23-134" aria-hidden="true" tabindex="-1"></a><span class="in">```{r}</span></span>
+<span id="cb23-135"><a href="#cb23-135" aria-hidden="true" tabindex="-1"></a><span class="co">#| label: aggs-r</span></span>
+<span id="cb23-136"><a href="#cb23-136" aria-hidden="true" tabindex="-1"></a>aggs <span class="ot">&lt;-</span> <span class="fu">et_aggregate</span>(</span>
+<span id="cb23-137"><a href="#cb23-137" aria-hidden="true" tabindex="-1"></a>  states,</span>
+<span id="cb23-138"><a href="#cb23-138" aria-hidden="true" tabindex="-1"></a>  <span class="at">arrays =</span> <span class="fu">list</span>(<span class="at">n_infected =</span> <span class="fu">et_array</span>(<span class="st">"Int"</span>, <span class="fu">c</span>(n_pens, n_timepoints))),</span>
+<span id="cb23-139"><a href="#cb23-139" aria-hidden="true" tabindex="-1"></a>  <span class="at">update =</span> <span class="cf">function</span>(model, data, X, state, i, t) {</span>
+<span id="cb23-140"><a href="#cb23-140" aria-hidden="true" tabindex="-1"></a>    n_infected[data<span class="sc">$</span>group[i], t] <span class="ot">&lt;-</span> n_infected[data<span class="sc">$</span>group[i], t] <span class="sc">+</span> (state <span class="sc">==</span> <span class="st">"I"</span>)</span>
+<span id="cb23-141"><a href="#cb23-141" aria-hidden="true" tabindex="-1"></a>  })</span>
+<span id="cb23-142"><a href="#cb23-142" aria-hidden="true" tabindex="-1"></a><span class="in">```</span></span>
+<span id="cb23-143"><a href="#cb23-143" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb23-144"><a href="#cb23-144" aria-hidden="true" tabindex="-1"></a><span class="fu">### Julia</span></span>
+<span id="cb23-145"><a href="#cb23-145" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb23-146"><a href="#cb23-146" aria-hidden="true" tabindex="-1"></a><span class="in">```julia</span></span>
+<span id="cb23-147"><a href="#cb23-147" aria-hidden="true" tabindex="-1"></a>aggs <span class="op">=</span> <span class="pp">@aggregate</span> state_space <span class="cf">begin</span></span>
+<span id="cb23-148"><a href="#cb23-148" aria-hidden="true" tabindex="-1"></a>    <span class="pp">@array</span> n_infected <span class="dt">Int</span> (n_pens, n_timepoints)</span>
+<span id="cb23-149"><a href="#cb23-149" aria-hidden="true" tabindex="-1"></a>    n_infected[data.group[i], t] <span class="op">+=</span> (state <span class="op">==</span> <span class="op">:</span>I)</span>
+<span id="cb23-150"><a href="#cb23-150" aria-hidden="true" tabindex="-1"></a><span class="cf">end</span></span>
+<span id="cb23-151"><a href="#cb23-151" aria-hidden="true" tabindex="-1"></a><span class="in">```</span></span>
+<span id="cb23-152"><a href="#cb23-152" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb23-153"><a href="#cb23-153" aria-hidden="true" tabindex="-1"></a>:::</span>
+<span id="cb23-154"><a href="#cb23-154" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb23-155"><a href="#cb23-155" aria-hidden="true" tabindex="-1"></a>The package attaches no meaning to this array. It is whatever your rates need.</span>
+<span id="cb23-156"><a href="#cb23-156" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb23-157"><a href="#cb23-157" aria-hidden="true" tabindex="-1"></a><span class="fu">## The rates</span></span>
+<span id="cb23-158"><a href="#cb23-158" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb23-159"><a href="#cb23-159" aria-hidden="true" tabindex="-1"></a>Ordinary functions of <span class="in">`(model, data, i, t)`</span>. <span class="in">`model`</span> holds the parameters; <span class="in">`data`</span></span>
+<span id="cb23-160"><a href="#cb23-160" aria-hidden="true" tabindex="-1"></a>holds everything else, including the tracked array above.</span>
+<span id="cb23-161"><a href="#cb23-161" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb23-162"><a href="#cb23-162" aria-hidden="true" tabindex="-1"></a>::: {.panel-tabset}</span>
+<span id="cb23-163"><a href="#cb23-163" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb23-164"><a href="#cb23-164" aria-hidden="true" tabindex="-1"></a><span class="fu">### R</span></span>
+<span id="cb23-165"><a href="#cb23-165" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb23-168"><a href="#cb23-168" aria-hidden="true" tabindex="-1"></a><span class="in">```{r}</span></span>
+<span id="cb23-169"><a href="#cb23-169" aria-hidden="true" tabindex="-1"></a><span class="co">#| label: rates-r</span></span>
+<span id="cb23-170"><a href="#cb23-170" aria-hidden="true" tabindex="-1"></a>infection <span class="ot">&lt;-</span> <span class="cf">function</span>(model, data, i, t) {</span>
+<span id="cb23-171"><a href="#cb23-171" aria-hidden="true" tabindex="-1"></a>  I_minus <span class="ot">&lt;-</span> data<span class="sc">$</span>aggregates<span class="sc">$</span>n_infected[data<span class="sc">$</span>group[i], t]</span>
+<span id="cb23-172"><a href="#cb23-172" aria-hidden="true" tabindex="-1"></a>  <span class="sc">-</span><span class="fu">expm1</span>(<span class="sc">-</span>(model<span class="sc">$</span>alpha <span class="sc">+</span> model<span class="sc">$</span>beta <span class="sc">*</span> I_minus))</span>
+<span id="cb23-173"><a href="#cb23-173" aria-hidden="true" tabindex="-1"></a>}</span>
+<span id="cb23-174"><a href="#cb23-174" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb23-175"><a href="#cb23-175" aria-hidden="true" tabindex="-1"></a>recovery <span class="ot">&lt;-</span> <span class="cf">function</span>(model, data, i, t) <span class="dv">1</span> <span class="sc">/</span> model<span class="sc">$</span>m</span>
+<span id="cb23-176"><a href="#cb23-176" aria-hidden="true" tabindex="-1"></a><span class="in">```</span></span>
+<span id="cb23-177"><a href="#cb23-177" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb23-178"><a href="#cb23-178" aria-hidden="true" tabindex="-1"></a><span class="fu">### Julia</span></span>
+<span id="cb23-179"><a href="#cb23-179" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb23-180"><a href="#cb23-180" aria-hidden="true" tabindex="-1"></a><span class="in">```julia</span></span>
+<span id="cb23-181"><a href="#cb23-181" aria-hidden="true" tabindex="-1"></a><span class="kw">function</span> <span class="fu">infection</span>(model, data, i, t)</span>
+<span id="cb23-182"><a href="#cb23-182" aria-hidden="true" tabindex="-1"></a>    I_minus <span class="op">=</span> data.aggregates.n_infected[data.group[i], t]</span>
+<span id="cb23-183"><a href="#cb23-183" aria-hidden="true" tabindex="-1"></a>    <span class="fu">-expm1</span>(<span class="fu">-</span>(model.α <span class="op">+</span> model.β <span class="op">*</span> I_minus))</span>
+<span id="cb23-184"><a href="#cb23-184" aria-hidden="true" tabindex="-1"></a><span class="kw">end</span></span>
+<span id="cb23-185"><a href="#cb23-185" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb23-186"><a href="#cb23-186" aria-hidden="true" tabindex="-1"></a><span class="fu">recovery</span>(model, data, i, t) <span class="op">=</span> <span class="fl">1</span> <span class="op">/</span> model.m</span>
+<span id="cb23-187"><a href="#cb23-187" aria-hidden="true" tabindex="-1"></a><span class="in">```</span></span>
+<span id="cb23-188"><a href="#cb23-188" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb23-189"><a href="#cb23-189" aria-hidden="true" tabindex="-1"></a>:::</span>
+<span id="cb23-190"><a href="#cb23-190" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb23-191"><a href="#cb23-191" aria-hidden="true" tabindex="-1"></a><span class="in">`n_infected`</span> excludes the animal currently being resampled, which is exactly the</span>
+<span id="cb23-192"><a href="#cb23-192" aria-hidden="true" tabindex="-1"></a>leave-one-out count the force of infection needs — you get that for free from</span>
+<span id="cb23-193"><a href="#cb23-193" aria-hidden="true" tabindex="-1"></a>having declared a reversible update.</span>
+<span id="cb23-194"><a href="#cb23-194" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb23-195"><a href="#cb23-195" aria-hidden="true" tabindex="-1"></a><span class="fu">## The transitions</span></span>
+<span id="cb23-196"><a href="#cb23-196" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb23-197"><a href="#cb23-197" aria-hidden="true" tabindex="-1"></a>::: {.panel-tabset}</span>
+<span id="cb23-198"><a href="#cb23-198" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb23-199"><a href="#cb23-199" aria-hidden="true" tabindex="-1"></a><span class="fu">### R</span></span>
+<span id="cb23-200"><a href="#cb23-200" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb23-203"><a href="#cb23-203" aria-hidden="true" tabindex="-1"></a><span class="in">```{r}</span></span>
+<span id="cb23-204"><a href="#cb23-204" aria-hidden="true" tabindex="-1"></a><span class="co">#| label: trans-r</span></span>
+<span id="cb23-205"><a href="#cb23-205" aria-hidden="true" tabindex="-1"></a>trans <span class="ot">&lt;-</span> <span class="fu">et_transitions</span>(states,</span>
+<span id="cb23-206"><a href="#cb23-206" aria-hidden="true" tabindex="-1"></a>  <span class="st">"S -&gt; I"</span> <span class="ot">=</span> infection,</span>
+<span id="cb23-207"><a href="#cb23-207" aria-hidden="true" tabindex="-1"></a>  <span class="st">"I -&gt; S"</span> <span class="ot">=</span> recovery)</span>
+<span id="cb23-208"><a href="#cb23-208" aria-hidden="true" tabindex="-1"></a><span class="in">```</span></span>
+<span id="cb23-209"><a href="#cb23-209" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb23-210"><a href="#cb23-210" aria-hidden="true" tabindex="-1"></a><span class="fu">### Julia</span></span>
+<span id="cb23-211"><a href="#cb23-211" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb23-212"><a href="#cb23-212" aria-hidden="true" tabindex="-1"></a><span class="in">```julia</span></span>
+<span id="cb23-213"><a href="#cb23-213" aria-hidden="true" tabindex="-1"></a>trans_mat <span class="op">=</span> <span class="pp">@transitions</span> state_space <span class="cf">begin</span></span>
+<span id="cb23-214"><a href="#cb23-214" aria-hidden="true" tabindex="-1"></a>    S <span class="op">-&gt;</span> I <span class="op">=</span> infection</span>
+<span id="cb23-215"><a href="#cb23-215" aria-hidden="true" tabindex="-1"></a>    I <span class="op">-&gt;</span> S <span class="op">=</span> recovery</span>
+<span id="cb23-216"><a href="#cb23-216" aria-hidden="true" tabindex="-1"></a><span class="cf">end</span></span>
+<span id="cb23-217"><a href="#cb23-217" aria-hidden="true" tabindex="-1"></a><span class="in">```</span></span>
+<span id="cb23-218"><a href="#cb23-218" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb23-219"><a href="#cb23-219" aria-hidden="true" tabindex="-1"></a>:::</span>
+<span id="cb23-220"><a href="#cb23-220" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb23-221"><a href="#cb23-221" aria-hidden="true" tabindex="-1"></a>Two moves declared. The self-transitions (<span class="in">`S→S`</span>, <span class="in">`I→I`</span>) take whatever</span>
+<span id="cb23-222"><a href="#cb23-222" aria-hidden="true" tabindex="-1"></a>probability is left over, so the rows sum to one without your having to say so.</span>
+<span id="cb23-223"><a href="#cb23-223" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb23-224"><a href="#cb23-224" aria-hidden="true" tabindex="-1"></a><span class="fu">## Where an animal starts</span></span>
+<span id="cb23-225"><a href="#cb23-225" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb23-226"><a href="#cb23-226" aria-hidden="true" tabindex="-1"></a>::: {.panel-tabset}</span>
+<span id="cb23-227"><a href="#cb23-227" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb23-228"><a href="#cb23-228" aria-hidden="true" tabindex="-1"></a><span class="fu">### R</span></span>
+<span id="cb23-229"><a href="#cb23-229" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb23-232"><a href="#cb23-232" aria-hidden="true" tabindex="-1"></a><span class="in">```{r}</span></span>
+<span id="cb23-233"><a href="#cb23-233" aria-hidden="true" tabindex="-1"></a><span class="co">#| label: start-r</span></span>
+<span id="cb23-234"><a href="#cb23-234" aria-hidden="true" tabindex="-1"></a>starting_state <span class="ot">&lt;-</span> <span class="cf">function</span>(model, data, X, i, t) {</span>
+<span id="cb23-235"><a href="#cb23-235" aria-hidden="true" tabindex="-1"></a>  p <span class="ot">&lt;-</span> <span class="fu">numeric</span>(data<span class="sc">$</span>n_states)</span>
+<span id="cb23-236"><a href="#cb23-236" aria-hidden="true" tabindex="-1"></a>  p[<span class="dv">1</span>] <span class="ot">&lt;-</span> <span class="dv">1</span> <span class="sc">-</span> model<span class="sc">$</span>nu</span>
+<span id="cb23-237"><a href="#cb23-237" aria-hidden="true" tabindex="-1"></a>  p[<span class="dv">2</span>] <span class="ot">&lt;-</span> model<span class="sc">$</span>nu</span>
+<span id="cb23-238"><a href="#cb23-238" aria-hidden="true" tabindex="-1"></a>  p</span>
+<span id="cb23-239"><a href="#cb23-239" aria-hidden="true" tabindex="-1"></a>}</span>
+<span id="cb23-240"><a href="#cb23-240" aria-hidden="true" tabindex="-1"></a><span class="in">```</span></span>
+<span id="cb23-241"><a href="#cb23-241" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb23-242"><a href="#cb23-242" aria-hidden="true" tabindex="-1"></a><span class="fu">### Julia</span></span>
+<span id="cb23-243"><a href="#cb23-243" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb23-244"><a href="#cb23-244" aria-hidden="true" tabindex="-1"></a><span class="in">```julia</span></span>
+<span id="cb23-245"><a href="#cb23-245" aria-hidden="true" tabindex="-1"></a><span class="fu">starting_state</span>(model, data, X, i, t) <span class="op">=</span> [<span class="fl">1</span> <span class="op">-</span> model.ν, model.ν]</span>
+<span id="cb23-246"><a href="#cb23-246" aria-hidden="true" tabindex="-1"></a><span class="in">```</span></span>
+<span id="cb23-247"><a href="#cb23-247" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb23-248"><a href="#cb23-248" aria-hidden="true" tabindex="-1"></a>:::</span>
+<span id="cb23-249"><a href="#cb23-249" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb23-250"><a href="#cb23-250" aria-hidden="true" tabindex="-1"></a><span class="fu">## What we observe</span></span>
+<span id="cb23-251"><a href="#cb23-251" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb23-252"><a href="#cb23-252" aria-hidden="true" tabindex="-1"></a>Two imperfect tests, each with its own sensitivity and perfect specificity. A</span>
+<span id="cb23-253"><a href="#cb23-253" aria-hidden="true" tabindex="-1"></a>negative entry means the animal was not tested that day, so the result says</span>
+<span id="cb23-254"><a href="#cb23-254" aria-hidden="true" tabindex="-1"></a>nothing.</span>
+<span id="cb23-255"><a href="#cb23-255" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb23-256"><a href="#cb23-256" aria-hidden="true" tabindex="-1"></a>The package knows none of this — it just multiplies these weights into the</span>
+<span id="cb23-257"><a href="#cb23-257" aria-hidden="true" tabindex="-1"></a>filter.</span>
+<span id="cb23-258"><a href="#cb23-258" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb23-259"><a href="#cb23-259" aria-hidden="true" tabindex="-1"></a>::: {.panel-tabset}</span>
+<span id="cb23-260"><a href="#cb23-260" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb23-261"><a href="#cb23-261" aria-hidden="true" tabindex="-1"></a><span class="fu">### R</span></span>
+<span id="cb23-262"><a href="#cb23-262" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb23-265"><a href="#cb23-265" aria-hidden="true" tabindex="-1"></a><span class="in">```{r}</span></span>
+<span id="cb23-266"><a href="#cb23-266" aria-hidden="true" tabindex="-1"></a><span class="co">#| label: obs-r</span></span>
+<span id="cb23-267"><a href="#cb23-267" aria-hidden="true" tabindex="-1"></a>cattle_observations <span class="ot">&lt;-</span> <span class="cf">function</span>(model, data, X, i, t) {</span>
+<span id="cb23-268"><a href="#cb23-268" aria-hidden="true" tabindex="-1"></a>  w <span class="ot">&lt;-</span> <span class="fu">rep</span>(<span class="dv">1</span>, data<span class="sc">$</span>n_states)</span>
+<span id="cb23-269"><a href="#cb23-269" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb23-270"><a href="#cb23-270" aria-hidden="true" tabindex="-1"></a>  y <span class="ot">&lt;-</span> data<span class="sc">$</span>rams[t, i]</span>
+<span id="cb23-271"><a href="#cb23-271" aria-hidden="true" tabindex="-1"></a>  <span class="cf">if</span> (y <span class="sc">&gt;=</span> <span class="dv">0</span>) {</span>
+<span id="cb23-272"><a href="#cb23-272" aria-hidden="true" tabindex="-1"></a>    w[<span class="dv">1</span>] <span class="ot">&lt;-</span> w[<span class="dv">1</span>] <span class="sc">*</span> <span class="fu">ifelse</span>(y <span class="sc">==</span> <span class="dv">1</span>, <span class="dv">0</span>, <span class="dv">1</span>)                          <span class="co"># S never tests +</span></span>
+<span id="cb23-273"><a href="#cb23-273" aria-hidden="true" tabindex="-1"></a>    w[<span class="dv">2</span>] <span class="ot">&lt;-</span> w[<span class="dv">2</span>] <span class="sc">*</span> <span class="fu">ifelse</span>(y <span class="sc">==</span> <span class="dv">1</span>, model<span class="sc">$</span>theta_r, <span class="dv">1</span> <span class="sc">-</span> model<span class="sc">$</span>theta_r)</span>
+<span id="cb23-274"><a href="#cb23-274" aria-hidden="true" tabindex="-1"></a>  }</span>
+<span id="cb23-275"><a href="#cb23-275" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb23-276"><a href="#cb23-276" aria-hidden="true" tabindex="-1"></a>  y <span class="ot">&lt;-</span> data<span class="sc">$</span>faecal[t, i]</span>
+<span id="cb23-277"><a href="#cb23-277" aria-hidden="true" tabindex="-1"></a>  <span class="cf">if</span> (y <span class="sc">&gt;=</span> <span class="dv">0</span>) {</span>
+<span id="cb23-278"><a href="#cb23-278" aria-hidden="true" tabindex="-1"></a>    w[<span class="dv">1</span>] <span class="ot">&lt;-</span> w[<span class="dv">1</span>] <span class="sc">*</span> <span class="fu">ifelse</span>(y <span class="sc">==</span> <span class="dv">1</span>, <span class="dv">0</span>, <span class="dv">1</span>)</span>
+<span id="cb23-279"><a href="#cb23-279" aria-hidden="true" tabindex="-1"></a>    w[<span class="dv">2</span>] <span class="ot">&lt;-</span> w[<span class="dv">2</span>] <span class="sc">*</span> <span class="fu">ifelse</span>(y <span class="sc">==</span> <span class="dv">1</span>, model<span class="sc">$</span>theta_f, <span class="dv">1</span> <span class="sc">-</span> model<span class="sc">$</span>theta_f)</span>
+<span id="cb23-280"><a href="#cb23-280" aria-hidden="true" tabindex="-1"></a>  }</span>
+<span id="cb23-281"><a href="#cb23-281" aria-hidden="true" tabindex="-1"></a>  w</span>
+<span id="cb23-282"><a href="#cb23-282" aria-hidden="true" tabindex="-1"></a>}</span>
+<span id="cb23-283"><a href="#cb23-283" aria-hidden="true" tabindex="-1"></a><span class="in">```</span></span>
+<span id="cb23-284"><a href="#cb23-284" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb23-285"><a href="#cb23-285" aria-hidden="true" tabindex="-1"></a><span class="fu">### Julia</span></span>
+<span id="cb23-286"><a href="#cb23-286" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb23-287"><a href="#cb23-287" aria-hidden="true" tabindex="-1"></a><span class="in">```julia</span></span>
+<span id="cb23-288"><a href="#cb23-288" aria-hidden="true" tabindex="-1"></a><span class="kw">function</span> <span class="fu">cattle_observations</span>(model, data, X, i, t)</span>
+<span id="cb23-289"><a href="#cb23-289" aria-hidden="true" tabindex="-1"></a>    w <span class="op">=</span> <span class="fu">ones</span>(<span class="fu">eltype</span>(model.θʳ), data.n_states)</span>
+<span id="cb23-290"><a href="#cb23-290" aria-hidden="true" tabindex="-1"></a>    <span class="cf">for</span> (results, θ) <span class="kw">in</span> ((data.rams, model.θʳ), (data.faecal, model.θᶠ))</span>
+<span id="cb23-291"><a href="#cb23-291" aria-hidden="true" tabindex="-1"></a>        y <span class="op">=</span> results[t, i]</span>
+<span id="cb23-292"><a href="#cb23-292" aria-hidden="true" tabindex="-1"></a>        y <span class="op">&lt;</span> <span class="fl">0</span> <span class="op">&amp;&amp;</span> <span class="cf">continue</span>                       <span class="co"># not tested</span></span>
+<span id="cb23-293"><a href="#cb23-293" aria-hidden="true" tabindex="-1"></a>        w[<span class="fl">1</span>] <span class="op">*=</span> y <span class="op">==</span> <span class="fl">1</span> ? <span class="fl">0.0</span> <span class="op">:</span> <span class="fl">1.0</span>              <span class="co"># S never tests positive</span></span>
+<span id="cb23-294"><a href="#cb23-294" aria-hidden="true" tabindex="-1"></a>        w[<span class="fl">2</span>] <span class="op">*=</span> y <span class="op">==</span> <span class="fl">1</span> ? θ <span class="op">:</span> (<span class="fl">1</span> <span class="op">-</span> θ)</span>
+<span id="cb23-295"><a href="#cb23-295" aria-hidden="true" tabindex="-1"></a>    <span class="cf">end</span></span>
+<span id="cb23-296"><a href="#cb23-296" aria-hidden="true" tabindex="-1"></a>    w</span>
+<span id="cb23-297"><a href="#cb23-297" aria-hidden="true" tabindex="-1"></a><span class="kw">end</span></span>
+<span id="cb23-298"><a href="#cb23-298" aria-hidden="true" tabindex="-1"></a><span class="in">```</span></span>
+<span id="cb23-299"><a href="#cb23-299" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb23-300"><a href="#cb23-300" aria-hidden="true" tabindex="-1"></a>:::</span>
+<span id="cb23-301"><a href="#cb23-301" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb23-302"><a href="#cb23-302" aria-hidden="true" tabindex="-1"></a>::: {.callout-note}</span>
+<span id="cb23-303"><a href="#cb23-303" aria-hidden="true" tabindex="-1"></a><span class="fu">## One thing worth knowing in both languages</span></span>
+<span id="cb23-304"><a href="#cb23-304" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb23-305"><a href="#cb23-305" aria-hidden="true" tabindex="-1"></a><span class="in">`rep(1, data$n_states)`</span> in R, and <span class="in">`ones(eltype(model.θʳ), ...)`</span> in Julia, do the</span>
+<span id="cb23-306"><a href="#cb23-306" aria-hidden="true" tabindex="-1"></a>same job: allocate at the **parameter's** scalar type rather than at <span class="in">`Float64`</span>.</span>
+<span id="cb23-307"><a href="#cb23-307" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb23-308"><a href="#cb23-308" aria-hidden="true" tabindex="-1"></a>This matters because that type depends on the *blocking*, not the model. When a</span>
+<span id="cb23-309"><a href="#cb23-309" aria-hidden="true" tabindex="-1"></a>test sensitivity is sampled conjugately it is a plain number; when it sits in an</span>
+<span id="cb23-310"><a href="#cb23-310" aria-hidden="true" tabindex="-1"></a>HMC block it is whatever the autodiff backend uses. Writing <span class="in">`zeros(Float64, ...)`</span></span>
+<span id="cb23-311"><a href="#cb23-311" aria-hidden="true" tabindex="-1"></a>works until someone moves a parameter between blocks, and then throws.</span>
+<span id="cb23-312"><a href="#cb23-312" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb23-313"><a href="#cb23-313" aria-hidden="true" tabindex="-1"></a>In R the package handles it — <span class="in">`rep(1, n)`</span> is translated appropriately. In Julia</span>
+<span id="cb23-314"><a href="#cb23-314" aria-hidden="true" tabindex="-1"></a>you write it yourself, which is why the idiom is <span class="in">`eltype(model.something)`</span> rather</span>
+<span id="cb23-315"><a href="#cb23-315" aria-hidden="true" tabindex="-1"></a>than a literal type.</span>
+<span id="cb23-316"><a href="#cb23-316" aria-hidden="true" tabindex="-1"></a>:::</span>
+<span id="cb23-317"><a href="#cb23-317" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb23-318"><a href="#cb23-318" aria-hidden="true" tabindex="-1"></a><span class="fu">## Assembling</span></span>
+<span id="cb23-319"><a href="#cb23-319" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb23-320"><a href="#cb23-320" aria-hidden="true" tabindex="-1"></a>::: {.panel-tabset}</span>
+<span id="cb23-321"><a href="#cb23-321" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb23-322"><a href="#cb23-322" aria-hidden="true" tabindex="-1"></a><span class="fu">### R</span></span>
+<span id="cb23-323"><a href="#cb23-323" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb23-326"><a href="#cb23-326" aria-hidden="true" tabindex="-1"></a><span class="in">```{r}</span></span>
+<span id="cb23-327"><a href="#cb23-327" aria-hidden="true" tabindex="-1"></a><span class="co">#| label: data-r</span></span>
+<span id="cb23-328"><a href="#cb23-328" aria-hidden="true" tabindex="-1"></a>dat <span class="ot">&lt;-</span> <span class="fu">et_data</span>(</span>
+<span id="cb23-329"><a href="#cb23-329" aria-hidden="true" tabindex="-1"></a>  <span class="at">n_individuals  =</span> n_individuals,</span>
+<span id="cb23-330"><a href="#cb23-330" aria-hidden="true" tabindex="-1"></a>  <span class="at">n_timepoints   =</span> n_timepoints,</span>
+<span id="cb23-331"><a href="#cb23-331" aria-hidden="true" tabindex="-1"></a>  <span class="at">transitions    =</span> trans,</span>
+<span id="cb23-332"><a href="#cb23-332" aria-hidden="true" tabindex="-1"></a>  <span class="at">starting_state =</span> starting_state,</span>
+<span id="cb23-333"><a href="#cb23-333" aria-hidden="true" tabindex="-1"></a>  <span class="at">aggregates     =</span> aggs,</span>
+<span id="cb23-334"><a href="#cb23-334" aria-hidden="true" tabindex="-1"></a>  <span class="at">group          =</span> group,</span>
+<span id="cb23-335"><a href="#cb23-335" aria-hidden="true" tabindex="-1"></a>  <span class="at">observation_process =</span> cattle_observations,</span>
+<span id="cb23-336"><a href="#cb23-336" aria-hidden="true" tabindex="-1"></a>  <span class="co"># your own data, reachable as data$rams / data$faecal above</span></span>
+<span id="cb23-337"><a href="#cb23-337" aria-hidden="true" tabindex="-1"></a>  <span class="at">extras =</span> <span class="fu">list</span>(<span class="at">rams =</span> rams, <span class="at">faecal =</span> faecal))</span>
+<span id="cb23-338"><a href="#cb23-338" aria-hidden="true" tabindex="-1"></a><span class="in">```</span></span>
+<span id="cb23-339"><a href="#cb23-339" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb23-340"><a href="#cb23-340" aria-hidden="true" tabindex="-1"></a><span class="fu">### Julia</span></span>
+<span id="cb23-341"><a href="#cb23-341" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb23-342"><a href="#cb23-342" aria-hidden="true" tabindex="-1"></a><span class="in">```julia</span></span>
+<span id="cb23-343"><a href="#cb23-343" aria-hidden="true" tabindex="-1"></a>data <span class="op">=</span> <span class="fu">epidemic_data</span>(</span>
+<span id="cb23-344"><a href="#cb23-344" aria-hidden="true" tabindex="-1"></a>    n_individuals <span class="op">=</span> n_individuals,</span>
+<span id="cb23-345"><a href="#cb23-345" aria-hidden="true" tabindex="-1"></a>    n_timepoints  <span class="op">=</span> n_timepoints,</span>
+<span id="cb23-346"><a href="#cb23-346" aria-hidden="true" tabindex="-1"></a>    trans_mat     <span class="op">=</span> trans_mat,</span>
+<span id="cb23-347"><a href="#cb23-347" aria-hidden="true" tabindex="-1"></a>    starting_state <span class="op">=</span> starting_state,</span>
+<span id="cb23-348"><a href="#cb23-348" aria-hidden="true" tabindex="-1"></a>    aggregates    <span class="op">=</span> aggs,</span>
+<span id="cb23-349"><a href="#cb23-349" aria-hidden="true" tabindex="-1"></a>    group         <span class="op">=</span> group,</span>
+<span id="cb23-350"><a href="#cb23-350" aria-hidden="true" tabindex="-1"></a>    observation_process <span class="op">=</span> cattle_observations,</span>
+<span id="cb23-351"><a href="#cb23-351" aria-hidden="true" tabindex="-1"></a>    <span class="co"># your own data, reachable as data.rams / data.faecal above</span></span>
+<span id="cb23-352"><a href="#cb23-352" aria-hidden="true" tabindex="-1"></a>    rams <span class="op">=</span> Rmask, faecal <span class="op">=</span> Fmask)</span>
+<span id="cb23-353"><a href="#cb23-353" aria-hidden="true" tabindex="-1"></a><span class="in">```</span></span>
+<span id="cb23-354"><a href="#cb23-354" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb23-355"><a href="#cb23-355" aria-hidden="true" tabindex="-1"></a>:::</span>
+<span id="cb23-356"><a href="#cb23-356" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb23-357"><a href="#cb23-357" aria-hidden="true" tabindex="-1"></a>Anything the package does not name is yours, and it never looks inside.</span>
+<span id="cb23-358"><a href="#cb23-358" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb23-359"><a href="#cb23-359" aria-hidden="true" tabindex="-1"></a><span class="fu">## Parameters and priors</span></span>
+<span id="cb23-360"><a href="#cb23-360" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb23-361"><a href="#cb23-361" aria-hidden="true" tabindex="-1"></a>::: {.panel-tabset}</span>
+<span id="cb23-362"><a href="#cb23-362" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb23-363"><a href="#cb23-363" aria-hidden="true" tabindex="-1"></a><span class="fu">### R</span></span>
+<span id="cb23-364"><a href="#cb23-364" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb23-367"><a href="#cb23-367" aria-hidden="true" tabindex="-1"></a><span class="in">```{r}</span></span>
+<span id="cb23-368"><a href="#cb23-368" aria-hidden="true" tabindex="-1"></a><span class="co">#| label: model-r</span></span>
+<span id="cb23-369"><a href="#cb23-369" aria-hidden="true" tabindex="-1"></a>mod <span class="ot">&lt;-</span> <span class="fu">et_model</span>(</span>
+<span id="cb23-370"><a href="#cb23-370" aria-hidden="true" tabindex="-1"></a>  <span class="at">data =</span> dat,</span>
+<span id="cb23-371"><a href="#cb23-371" aria-hidden="true" tabindex="-1"></a>  <span class="at">parameters =</span> <span class="fu">list</span>(</span>
+<span id="cb23-372"><a href="#cb23-372" aria-hidden="true" tabindex="-1"></a>    <span class="at">alpha   =</span> <span class="fu">et_par</span>(<span class="fu">et_gamma</span>(<span class="dv">1</span>, <span class="dv">1</span>), <span class="at">init =</span> <span class="fl">0.05</span>),</span>
+<span id="cb23-373"><a href="#cb23-373" aria-hidden="true" tabindex="-1"></a>    <span class="at">beta    =</span> <span class="fu">et_par</span>(<span class="fu">et_gamma</span>(<span class="dv">1</span>, <span class="dv">1</span>), <span class="at">init =</span> <span class="fl">0.05</span>),</span>
+<span id="cb23-374"><a href="#cb23-374" aria-hidden="true" tabindex="-1"></a>    <span class="at">m_tilde =</span> <span class="fu">et_par</span>(<span class="fu">et_gamma</span>(<span class="dv">2</span>, <span class="dv">4</span>), <span class="at">init =</span> <span class="fl">4.0</span>),</span>
+<span id="cb23-375"><a href="#cb23-375" aria-hidden="true" tabindex="-1"></a>    <span class="at">nu      =</span> <span class="fu">et_par</span>(<span class="fu">et_beta</span>(<span class="dv">1</span>, <span class="dv">1</span>),  <span class="at">init =</span> <span class="fl">0.10</span>),</span>
+<span id="cb23-376"><a href="#cb23-376" aria-hidden="true" tabindex="-1"></a>    <span class="at">theta_r =</span> <span class="fu">et_par</span>(<span class="fu">et_beta</span>(<span class="dv">1</span>, <span class="dv">1</span>),  <span class="at">init =</span> <span class="fl">0.70</span>),</span>
+<span id="cb23-377"><a href="#cb23-377" aria-hidden="true" tabindex="-1"></a>    <span class="at">theta_f =</span> <span class="fu">et_par</span>(<span class="fu">et_beta</span>(<span class="dv">1</span>, <span class="dv">1</span>),  <span class="at">init =</span> <span class="fl">0.40</span>)),</span>
+<span id="cb23-378"><a href="#cb23-378" aria-hidden="true" tabindex="-1"></a>  <span class="co"># m = m_tilde + 1 keeps 1/m &lt; 1, so the recovery probability can never leave</span></span>
+<span id="cb23-379"><a href="#cb23-379" aria-hidden="true" tabindex="-1"></a>  <span class="co"># (0, 1) and send the sampler into a DomainError.</span></span>
+<span id="cb23-380"><a href="#cb23-380" aria-hidden="true" tabindex="-1"></a>  <span class="at">derived =</span> <span class="fu">list</span>(<span class="at">m =</span> <span class="fu">quote</span>(m_tilde <span class="sc">+</span> <span class="dv">1</span>)))</span>
+<span id="cb23-381"><a href="#cb23-381" aria-hidden="true" tabindex="-1"></a><span class="in">```</span></span>
+<span id="cb23-382"><a href="#cb23-382" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb23-383"><a href="#cb23-383" aria-hidden="true" tabindex="-1"></a><span class="fu">### Julia</span></span>
+<span id="cb23-384"><a href="#cb23-384" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb23-385"><a href="#cb23-385" aria-hidden="true" tabindex="-1"></a><span class="in">```julia</span></span>
+<span id="cb23-386"><a href="#cb23-386" aria-hidden="true" tabindex="-1"></a><span class="pp">@model</span> <span class="kw">function</span> <span class="fu">cattle_model</span>(data, n_time, n_ind, loglik_fn, obs_loglik_fn)</span>
+<span id="cb23-387"><a href="#cb23-387" aria-hidden="true" tabindex="-1"></a>    α <span class="op">~</span> <span class="fu">Gamma</span>(<span class="fl">1</span>, <span class="fl">1</span>)</span>
+<span id="cb23-388"><a href="#cb23-388" aria-hidden="true" tabindex="-1"></a>    β <span class="op">~</span> <span class="fu">Gamma</span>(<span class="fl">1</span>, <span class="fl">1</span>)</span>
+<span id="cb23-389"><a href="#cb23-389" aria-hidden="true" tabindex="-1"></a>    m̃ <span class="op">~</span> <span class="fu">Gamma</span>(<span class="fl">2</span>, <span class="fl">4</span>)</span>
+<span id="cb23-390"><a href="#cb23-390" aria-hidden="true" tabindex="-1"></a>    m <span class="op">:=</span> m̃ <span class="op">+</span> <span class="fl">1.0</span>          <span class="co"># keeps 1/m &lt; 1</span></span>
+<span id="cb23-391"><a href="#cb23-391" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb23-392"><a href="#cb23-392" aria-hidden="true" tabindex="-1"></a>    ν  <span class="op">~</span> <span class="fu">Beta</span>(<span class="fl">1</span>, <span class="fl">1</span>)</span>
+<span id="cb23-393"><a href="#cb23-393" aria-hidden="true" tabindex="-1"></a>    θʳ <span class="op">~</span> <span class="fu">Beta</span>(<span class="fl">1</span>, <span class="fl">1</span>)</span>
+<span id="cb23-394"><a href="#cb23-394" aria-hidden="true" tabindex="-1"></a>    θᶠ <span class="op">~</span> <span class="fu">Beta</span>(<span class="fl">1</span>, <span class="fl">1</span>)</span>
+<span id="cb23-395"><a href="#cb23-395" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb23-396"><a href="#cb23-396" aria-hidden="true" tabindex="-1"></a>    <span class="co"># The whole trajectory is ONE latent block: held constant during the</span></span>
+<span id="cb23-397"><a href="#cb23-397" aria-hidden="true" tabindex="-1"></a>    <span class="co"># gradients, resampled once per Gibbs sweep by iFFBS.</span></span>
+<span id="cb23-398"><a href="#cb23-398" aria-hidden="true" tabindex="-1"></a>    X <span class="op">~</span> <span class="fu">TrajectoryLatent</span>(n_time, n_ind)</span>
+<span id="cb23-399"><a href="#cb23-399" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb23-400"><a href="#cb23-400" aria-hidden="true" tabindex="-1"></a>    pars <span class="op">=</span> (; α, β, m, ν, θʳ, θᶠ)</span>
+<span id="cb23-401"><a href="#cb23-401" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb23-402"><a href="#cb23-402" aria-hidden="true" tabindex="-1"></a>    <span class="co"># BOTH halves. Omitting the observation term is a silent modelling bug:</span></span>
+<span id="cb23-403"><a href="#cb23-403" aria-hidden="true" tabindex="-1"></a>    <span class="co"># every test parameter would then be sampled from its prior.</span></span>
+<span id="cb23-404"><a href="#cb23-404" aria-hidden="true" tabindex="-1"></a>    <span class="pp">@addlogprob</span>! <span class="fu">loglik_fn</span>(pars, data, X) <span class="op">+</span> <span class="fu">obs_loglik_fn</span>(pars, data, X)</span>
+<span id="cb23-405"><a href="#cb23-405" aria-hidden="true" tabindex="-1"></a><span class="kw">end</span></span>
+<span id="cb23-406"><a href="#cb23-406" aria-hidden="true" tabindex="-1"></a><span class="in">```</span></span>
+<span id="cb23-407"><a href="#cb23-407" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb23-408"><a href="#cb23-408" aria-hidden="true" tabindex="-1"></a>:::</span>
+<span id="cb23-409"><a href="#cb23-409" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb23-410"><a href="#cb23-410" aria-hidden="true" tabindex="-1"></a>::: {.callout-important}</span>
+<span id="cb23-411"><a href="#cb23-411" aria-hidden="true" tabindex="-1"></a><span class="fu">## The likelihood has two halves and you need both</span></span>
+<span id="cb23-412"><a href="#cb23-412" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb23-413"><a href="#cb23-413" aria-hidden="true" tabindex="-1"></a><span class="in">`epidemic_loglik`</span> covers the starting state and the transitions.</span>
+<span id="cb23-414"><a href="#cb23-414" aria-hidden="true" tabindex="-1"></a><span class="in">`epidemic_obs_loglik`</span> covers the observation process. Neither includes the other.</span>
+<span id="cb23-415"><a href="#cb23-415" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb23-416"><a href="#cb23-416" aria-hidden="true" tabindex="-1"></a>In Julia you write both terms yourself, and forgetting the second is a real bug</span>
+<span id="cb23-417"><a href="#cb23-417" aria-hidden="true" tabindex="-1"></a>that has shipped before: the observation process is used only by the filter, so</span>
+<span id="cb23-418"><a href="#cb23-418" aria-hidden="true" tabindex="-1"></a>every test parameter receives no likelihood information and is effectively</span>
+<span id="cb23-419"><a href="#cb23-419" aria-hidden="true" tabindex="-1"></a>sampled from its prior. The symptom is subtle — the parameters look</span>
+<span id="cb23-420"><a href="#cb23-420" aria-hidden="true" tabindex="-1"></a>prior-shaped — and there is no error.</span>
+<span id="cb23-421"><a href="#cb23-421" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb23-422"><a href="#cb23-422" aria-hidden="true" tabindex="-1"></a>In R the package emits both whenever an observation process is given, and warns</span>
+<span id="cb23-423"><a href="#cb23-423" aria-hidden="true" tabindex="-1"></a>when one is not.</span>
+<span id="cb23-424"><a href="#cb23-424" aria-hidden="true" tabindex="-1"></a>:::</span>
+<span id="cb23-425"><a href="#cb23-425" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb23-426"><a href="#cb23-426" aria-hidden="true" tabindex="-1"></a><span class="fu">## The sampler</span></span>
+<span id="cb23-427"><a href="#cb23-427" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb23-428"><a href="#cb23-428" aria-hidden="true" tabindex="-1"></a>::: {.panel-tabset}</span>
+<span id="cb23-429"><a href="#cb23-429" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb23-430"><a href="#cb23-430" aria-hidden="true" tabindex="-1"></a><span class="fu">### R</span></span>
+<span id="cb23-431"><a href="#cb23-431" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb23-434"><a href="#cb23-434" aria-hidden="true" tabindex="-1"></a><span class="in">```{r}</span></span>
+<span id="cb23-435"><a href="#cb23-435" aria-hidden="true" tabindex="-1"></a><span class="co">#| label: fit-r</span></span>
+<span id="cb23-436"><a href="#cb23-436" aria-hidden="true" tabindex="-1"></a><span class="co">#| eval: false</span></span>
+<span id="cb23-437"><a href="#cb23-437" aria-hidden="true" tabindex="-1"></a>fit <span class="ot">&lt;-</span> <span class="fu">et_sample</span>(mod,</span>
+<span id="cb23-438"><a href="#cb23-438" aria-hidden="true" tabindex="-1"></a>  <span class="at">blocks =</span> <span class="fu">list</span>(</span>
+<span id="cb23-439"><a href="#cb23-439" aria-hidden="true" tabindex="-1"></a>    <span class="fu">et_nuts</span>(<span class="fu">c</span>(<span class="st">"alpha"</span>, <span class="st">"beta"</span>, <span class="st">"m_tilde"</span>)),</span>
+<span id="cb23-440"><a href="#cb23-440" aria-hidden="true" tabindex="-1"></a>    <span class="co"># The initial infection frequency and the two test sensitivities have</span></span>
+<span id="cb23-441"><a href="#cb23-441" aria-hidden="true" tabindex="-1"></a>    <span class="co"># closed-form conditionals, so they get conjugate kernels rather than NUTS -</span></span>
+<span id="cb23-442"><a href="#cb23-442" aria-hidden="true" tabindex="-1"></a>    <span class="co"># an exact independent draw beats a correlated HMC step.</span></span>
+<span id="cb23-443"><a href="#cb23-443" aria-hidden="true" tabindex="-1"></a>    <span class="fu">et_conjugate_initial_state</span>(<span class="st">"nu"</span>, <span class="at">at =</span> <span class="dv">1</span>, <span class="at">states =</span> <span class="fu">c</span>(<span class="st">"S"</span>, <span class="st">"I"</span>)),</span>
+<span id="cb23-444"><a href="#cb23-444" aria-hidden="true" tabindex="-1"></a>    <span class="fu">et_conjugate_test_sensitivity</span>(<span class="st">"theta_r"</span>, <span class="at">y =</span> <span class="st">"rams"</span>,   <span class="at">infected_state =</span> <span class="st">"I"</span>),</span>
+<span id="cb23-445"><a href="#cb23-445" aria-hidden="true" tabindex="-1"></a>    <span class="fu">et_conjugate_test_sensitivity</span>(<span class="st">"theta_f"</span>, <span class="at">y =</span> <span class="st">"faecal"</span>, <span class="at">infected_state =</span> <span class="st">"I"</span>),</span>
+<span id="cb23-446"><a href="#cb23-446" aria-hidden="true" tabindex="-1"></a>    <span class="fu">et_iffbs</span>(<span class="st">"X"</span>)),</span>
+<span id="cb23-447"><a href="#cb23-447" aria-hidden="true" tabindex="-1"></a>  <span class="at">n_sweeps =</span> <span class="dv">2000</span>, <span class="at">n_burn =</span> <span class="dv">800</span>, <span class="at">n_adapts =</span> <span class="dv">400</span>, <span class="at">seed =</span> <span class="dv">7</span>,</span>
+<span id="cb23-448"><a href="#cb23-448" aria-hidden="true" tabindex="-1"></a>  <span class="at">x_init =</span> X_true)</span>
+<span id="cb23-449"><a href="#cb23-449" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb23-450"><a href="#cb23-450" aria-hidden="true" tabindex="-1"></a><span class="fu">summary</span>(fit)</span>
+<span id="cb23-451"><a href="#cb23-451" aria-hidden="true" tabindex="-1"></a><span class="in">```</span></span>
+<span id="cb23-452"><a href="#cb23-452" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb23-453"><a href="#cb23-453" aria-hidden="true" tabindex="-1"></a><span class="fu">### Julia</span></span>
+<span id="cb23-454"><a href="#cb23-454" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb23-455"><a href="#cb23-455" aria-hidden="true" tabindex="-1"></a><span class="in">```julia</span></span>
+<span id="cb23-456"><a href="#cb23-456" aria-hidden="true" tabindex="-1"></a>loglik     <span class="op">=</span> <span class="fu">epidemic_loglik</span>(data)</span>
+<span id="cb23-457"><a href="#cb23-457" aria-hidden="true" tabindex="-1"></a>obs_loglik <span class="op">=</span> <span class="fu">epidemic_obs_loglik</span>(data)</span>
+<span id="cb23-458"><a href="#cb23-458" aria-hidden="true" tabindex="-1"></a>latent!    <span class="op">=</span> <span class="fu">epidemic_latent_sampler</span>(data)</span>
+<span id="cb23-459"><a href="#cb23-459" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb23-460"><a href="#cb23-460" aria-hidden="true" tabindex="-1"></a>model <span class="op">=</span> <span class="fu">cattle_model</span>(data, n_timepoints, n_individuals, loglik, obs_loglik)</span>
+<span id="cb23-461"><a href="#cb23-461" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb23-462"><a href="#cb23-462" aria-hidden="true" tabindex="-1"></a>spl <span class="op">=</span> <span class="fu">Gibbs</span>(</span>
+<span id="cb23-463"><a href="#cb23-463" aria-hidden="true" tabindex="-1"></a>    (<span class="op">:</span>α, <span class="op">:</span>β, <span class="op">:</span>m̃) <span class="op">=&gt;</span> <span class="fu">NUTS</span>(<span class="fl">0.8</span>),</span>
+<span id="cb23-464"><a href="#cb23-464" aria-hidden="true" tabindex="-1"></a>    <span class="op">:</span>ν  <span class="op">=&gt;</span> <span class="fu">initial_state_kernel</span>(<span class="op">:</span>ν; at <span class="op">=</span> <span class="fl">1</span>, eligible <span class="op">=</span> (X, d, i, t) <span class="op">-&gt;</span> <span class="cn">true</span>,</span>
+<span id="cb23-465"><a href="#cb23-465" aria-hidden="true" tabindex="-1"></a>                                states <span class="op">=</span> (<span class="fl">1</span>, <span class="fl">2</span>), prior <span class="op">=</span> [<span class="fl">1.0</span>, <span class="fl">1.0</span>]),</span>
+<span id="cb23-466"><a href="#cb23-466" aria-hidden="true" tabindex="-1"></a>    <span class="op">:</span>θʳ <span class="op">=&gt;</span> <span class="fu">test_sensitivity_kernel</span>(<span class="op">:</span>θʳ; Y <span class="op">=</span> Rmask, infected_state <span class="op">=</span> <span class="fl">2</span>),</span>
+<span id="cb23-467"><a href="#cb23-467" aria-hidden="true" tabindex="-1"></a>    <span class="op">:</span>θᶠ <span class="op">=&gt;</span> <span class="fu">test_sensitivity_kernel</span>(<span class="op">:</span>θᶠ; Y <span class="op">=</span> Fmask, infected_state <span class="op">=</span> <span class="fl">2</span>),</span>
+<span id="cb23-468"><a href="#cb23-468" aria-hidden="true" tabindex="-1"></a>    <span class="op">:</span>X  <span class="op">=&gt;</span> <span class="fu">iffbs_kernel</span>(latent!; params <span class="op">=</span> (<span class="op">:</span>α, <span class="op">:</span>β, <span class="op">:</span>m, <span class="op">:</span>ν, <span class="op">:</span>θʳ, <span class="op">:</span>θᶠ)),</span>
+<span id="cb23-469"><a href="#cb23-469" aria-hidden="true" tabindex="-1"></a>)</span>
+<span id="cb23-470"><a href="#cb23-470" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb23-471"><a href="#cb23-471" aria-hidden="true" tabindex="-1"></a><span class="co"># The aggregates must agree with the STARTING trajectory before the first</span></span>
+<span id="cb23-472"><a href="#cb23-472" aria-hidden="true" tabindex="-1"></a><span class="co"># likelihood call. Established once here; the sampler preserves it thereafter.</span></span>
+<span id="cb23-473"><a href="#cb23-473" aria-hidden="true" tabindex="-1"></a>X0 <span class="op">=</span> <span class="fu">copy</span>(X_true)</span>
+<span id="cb23-474"><a href="#cb23-474" aria-hidden="true" tabindex="-1"></a><span class="fu">reset_aggregates!</span>(data)</span>
+<span id="cb23-475"><a href="#cb23-475" aria-hidden="true" tabindex="-1"></a><span class="fu">apply_derived_summaries!</span>((;), data, X0)</span>
+<span id="cb23-476"><a href="#cb23-476" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb23-477"><a href="#cb23-477" aria-hidden="true" tabindex="-1"></a>chn <span class="op">=</span> AbstractMCMC.<span class="fu">sample</span>(<span class="fu">StableRNG</span>(<span class="fl">7</span>), model, spl, <span class="fl">2000</span>;</span>
+<span id="cb23-478"><a href="#cb23-478" aria-hidden="true" tabindex="-1"></a>                          init <span class="op">=</span> (; X <span class="op">=</span> X0), n_adapts <span class="op">=</span> <span class="fl">400</span>,</span>
+<span id="cb23-479"><a href="#cb23-479" aria-hidden="true" tabindex="-1"></a>                          discard_initial <span class="op">=</span> <span class="fl">800</span>,</span>
+<span id="cb23-480"><a href="#cb23-480" aria-hidden="true" tabindex="-1"></a>                          save_states <span class="op">=</span> (X <span class="op">=</span> <span class="op">:</span>buffer,))</span>
+<span id="cb23-481"><a href="#cb23-481" aria-hidden="true" tabindex="-1"></a><span class="in">```</span></span>
+<span id="cb23-482"><a href="#cb23-482" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb23-483"><a href="#cb23-483" aria-hidden="true" tabindex="-1"></a>:::</span>
+<span id="cb23-484"><a href="#cb23-484" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb23-485"><a href="#cb23-485" aria-hidden="true" tabindex="-1"></a>In R, <span class="in">`blocks`</span> is optional: omit it and every parameter goes into one NUTS block</span>
+<span id="cb23-486"><a href="#cb23-486" aria-hidden="true" tabindex="-1"></a>with the trajectory sampled by iFFBS. It is spelled out here because the three</span>
+<span id="cb23-487"><a href="#cb23-487" aria-hidden="true" tabindex="-1"></a>conjugate kernels are worth having.</span>
+<span id="cb23-488"><a href="#cb23-488" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb23-489"><a href="#cb23-489" aria-hidden="true" tabindex="-1"></a>::: {.callout-note collapse="true"}</span>
+<span id="cb23-490"><a href="#cb23-490" aria-hidden="true" tabindex="-1"></a><span class="fu">## Why the trajectory is one block</span></span>
+<span id="cb23-491"><a href="#cb23-491" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb23-492"><a href="#cb23-492" aria-hidden="true" tabindex="-1"></a>The hidden trajectory <span class="in">`X`</span> is stored as a **single whole-matrix latent**, not as a</span>
+<span id="cb23-493"><a href="#cb23-493" aria-hidden="true" tabindex="-1"></a>family of indexed variables. That is what lets it be held constant during the</span>
+<span id="cb23-494"><a href="#cb23-494" aria-hidden="true" tabindex="-1"></a>gradient evaluations and resampled once per Gibbs sweep by iFFBS.</span>
+<span id="cb23-495"><a href="#cb23-495" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb23-496"><a href="#cb23-496" aria-hidden="true" tabindex="-1"></a>It is also the reason this package exists. Written naively inside a model body, a</span>
+<span id="cb23-497"><a href="#cb23-497" aria-hidden="true" tabindex="-1"></a>latent-state sampler re-runs on *every* gradient call — expensive, and because</span>
+<span id="cb23-498"><a href="#cb23-498" aria-hidden="true" tabindex="-1"></a>the sampler is stochastic it makes the gradient itself stochastic, which can</span>
+<span id="cb23-499"><a href="#cb23-499" aria-hidden="true" tabindex="-1"></a>invalidate the inference outright.</span>
+<span id="cb23-500"><a href="#cb23-500" aria-hidden="true" tabindex="-1"></a>:::</span>
+<span id="cb23-501"><a href="#cb23-501" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb23-502"><a href="#cb23-502" aria-hidden="true" tabindex="-1"></a><span class="fu">## Results</span></span>
+<span id="cb23-503"><a href="#cb23-503" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb23-504"><a href="#cb23-504" aria-hidden="true" tabindex="-1"></a>Both versions recover the simulated truth. From the R run:</span>
+<span id="cb23-505"><a href="#cb23-505" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb23-506"><a href="#cb23-506" aria-hidden="true" tabindex="-1"></a><span class="in">```</span></span>
+<span id="cb23-507"><a href="#cb23-507" aria-hidden="true" tabindex="-1"></a><span class="in">          mean     sd   2.5%    50%  97.5%</span></span>
+<span id="cb23-508"><a href="#cb23-508" aria-hidden="true" tabindex="-1"></a><span class="in">alpha   0.0121 0.0032 0.0068 0.0117 0.0197</span></span>
+<span id="cb23-509"><a href="#cb23-509" aria-hidden="true" tabindex="-1"></a><span class="in">beta    0.0190 0.0042 0.0117 0.0188 0.0279</span></span>
+<span id="cb23-510"><a href="#cb23-510" aria-hidden="true" tabindex="-1"></a><span class="in">nu      0.1324 0.0423 0.0619 0.1286 0.2245</span></span>
+<span id="cb23-511"><a href="#cb23-511" aria-hidden="true" tabindex="-1"></a><span class="in">theta_r 0.7328 0.0457 0.6404 0.7348 0.8156</span></span>
+<span id="cb23-512"><a href="#cb23-512" aria-hidden="true" tabindex="-1"></a><span class="in">theta_f 0.4656 0.0428 0.3821 0.4653 0.5498</span></span>
+<span id="cb23-513"><a href="#cb23-513" aria-hidden="true" tabindex="-1"></a><span class="in">m       6.2078 0.8380 4.7773 6.1505 8.0649</span></span>
+<span id="cb23-514"><a href="#cb23-514" aria-hidden="true" tabindex="-1"></a><span class="in">```</span></span>
+<span id="cb23-515"><a href="#cb23-515" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb23-516"><a href="#cb23-516" aria-hidden="true" tabindex="-1"></a><span class="pp">|</span> parameter <span class="pp">|</span> truth <span class="pp">|</span> posterior mean <span class="pp">|</span></span>
+<span id="cb23-517"><a href="#cb23-517" aria-hidden="true" tabindex="-1"></a><span class="pp">|---|---|---|</span></span>
+<span id="cb23-518"><a href="#cb23-518" aria-hidden="true" tabindex="-1"></a><span class="pp">|</span> <span class="in">`alpha`</span> <span class="pp">|</span> 0.01 <span class="pp">|</span> 0.0121 <span class="pp">|</span></span>
+<span id="cb23-519"><a href="#cb23-519" aria-hidden="true" tabindex="-1"></a><span class="pp">|</span> <span class="in">`beta`</span> <span class="pp">|</span> 0.02 <span class="pp">|</span> 0.0190 <span class="pp">|</span></span>
+<span id="cb23-520"><a href="#cb23-520" aria-hidden="true" tabindex="-1"></a><span class="pp">|</span> <span class="in">`m`</span> <span class="pp">|</span> 6 <span class="pp">|</span> 6.21 <span class="pp">|</span></span>
+<span id="cb23-521"><a href="#cb23-521" aria-hidden="true" tabindex="-1"></a><span class="pp">|</span> <span class="in">`nu`</span> <span class="pp">|</span> 0.10 <span class="pp">|</span> 0.132 <span class="pp">|</span></span>
+<span id="cb23-522"><a href="#cb23-522" aria-hidden="true" tabindex="-1"></a><span class="pp">|</span> <span class="in">`theta_r`</span> <span class="pp">|</span> 0.8 <span class="pp">|</span> 0.733 <span class="pp">|</span></span>
+<span id="cb23-523"><a href="#cb23-523" aria-hidden="true" tabindex="-1"></a><span class="pp">|</span> <span class="in">`theta_f`</span> <span class="pp">|</span> 0.5 <span class="pp">|</span> 0.466 <span class="pp">|</span></span>
+<span id="cb23-524"><a href="#cb23-524" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb23-525"><a href="#cb23-525" aria-hidden="true" tabindex="-1"></a>All six within three standard errors, from 2000 sweeps in about 49 seconds — on</span>
+<span id="cb23-526"><a href="#cb23-526" aria-hidden="true" tabindex="-1"></a>data where the states are never directly observed.</span>
+<span id="cb23-527"><a href="#cb23-527" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb23-528"><a href="#cb23-528" aria-hidden="true" tabindex="-1"></a><span class="fu">## Seeing the Julia from R</span></span>
+<span id="cb23-529"><a href="#cb23-529" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb23-530"><a href="#cb23-530" aria-hidden="true" tabindex="-1"></a>The generated module is a first-class artefact, not a hidden intermediate. It is</span>
+<span id="cb23-531"><a href="#cb23-531" aria-hidden="true" tabindex="-1"></a>commented, it runs standalone, and it is the on-ramp if you want to move a model</span>
+<span id="cb23-532"><a href="#cb23-532" aria-hidden="true" tabindex="-1"></a>from R to Julia.</span>
+<span id="cb23-533"><a href="#cb23-533" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb23-536"><a href="#cb23-536" aria-hidden="true" tabindex="-1"></a><span class="in">```{r}</span></span>
+<span id="cb23-537"><a href="#cb23-537" aria-hidden="true" tabindex="-1"></a><span class="co">#| label: source</span></span>
+<span id="cb23-538"><a href="#cb23-538" aria-hidden="true" tabindex="-1"></a><span class="co">#| eval: false</span></span>
+<span id="cb23-539"><a href="#cb23-539" aria-hidden="true" tabindex="-1"></a><span class="fu">et_julia_source</span>(mod)   <span class="co"># print the module this model generates</span></span>
+<span id="cb23-540"><a href="#cb23-540" aria-hidden="true" tabindex="-1"></a><span class="fu">et_source</span>(fit)         <span class="co"># the module behind a fit</span></span>
+<span id="cb23-541"><a href="#cb23-541" aria-hidden="true" tabindex="-1"></a><span class="fu">et_eval</span>(<span class="st">"..."</span>)         <span class="co"># run anything in the session</span></span>
+<span id="cb23-542"><a href="#cb23-542" aria-hidden="true" tabindex="-1"></a><span class="in">```</span></span>
+<span id="cb23-543"><a href="#cb23-543" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb23-544"><a href="#cb23-544" aria-hidden="true" tabindex="-1"></a>That is how the two halves of this document relate: the R on the left generates</span>
+<span id="cb23-545"><a href="#cb23-545" aria-hidden="true" tabindex="-1"></a>something very close to the Julia on the right.</span>
+<span id="cb23-546"><a href="#cb23-546" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb23-547"><a href="#cb23-547" aria-hidden="true" tabindex="-1"></a><span class="fu">## Where to go next</span></span>
+<span id="cb23-548"><a href="#cb23-548" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb23-549"><a href="#cb23-549" aria-hidden="true" tabindex="-1"></a><span class="ss">* </span>**[The badger model](badger.qmd)** — the same ideas at scale: 2384 individuals,</span>
+<span id="cb23-550"><a href="#cb23-550" aria-hidden="true" tabindex="-1"></a>  four states, six tests, capture-recapture observation, survival, and the</span>
+<span id="cb23-551"><a href="#cb23-551" aria-hidden="true" tabindex="-1"></a>  performance seams this document deliberately ignores.</span>
+<span id="cb23-552"><a href="#cb23-552" aria-hidden="true" tabindex="-1"></a><span class="ss">* </span><span class="in">`et_check_depends()`</span> — verifies the dependency annotations that let each Gibbs</span>
+<span id="cb23-553"><a href="#cb23-553" aria-hidden="true" tabindex="-1"></a>  block skip likelihood terms it cannot move.</span>
+<span id="cb23-554"><a href="#cb23-554" aria-hidden="true" tabindex="-1"></a><span class="ss">* </span><span class="in">`et_residuals()`</span> — post-hoc PIT residuals for the mechanisms in your model,</span>
+<span id="cb23-555"><a href="#cb23-555" aria-hidden="true" tabindex="-1"></a>  which is how you find out whether any of this fitted well.</span>
+</code><button title="Copy to Clipboard" class="code-copy-button" data-in-quarto-modal=""><i class="bi"></i></button></pre></div>
+</div></div></div></div></div>
+</div> <!-- /content -->
+
+
+
+
+</body></html>

@@ -1,0 +1,31 @@
+Package: EpidemicTrajectoriesR
+Type: Package
+Title: Discrete-Time Individual-Level Epidemic Models from R, via Julia
+Version: 0.1.0
+Authors@R: person("Arthur", "Newbury", email = "a.r.newbury@exeter.ac.uk",
+    role = c("aut", "cre"))
+Description: Specify, fit and check discrete-time individual-level epidemic
+    models from R. Model structure -- states, transitions, tracked aggregates,
+    the observation process -- is declared with R objects, and the rate and
+    observation functions are written in a restricted subset of R that is
+    transpiled to Julia. The generated Julia drives 'EpidemicTrajectories.jl'
+    (simulator, autodiff likelihood, iFFBS latent-trajectory sampler),
+    'PracticalBayes.jl' (the Gibbs and latent-kernel machinery) and
+    'PracticalEpiBayes.jl' (the conjugate kernels), so the latent trajectory is
+    resampled once per Gibbs sweep rather than inside every gradient call. The
+    generated source is a first-class artefact: it is inspectable, runs
+    standalone, and is the on-ramp to writing the model in Julia directly.
+License: MIT + file LICENSE
+Encoding: UTF-8
+Roxygen: list(markdown = TRUE)
+Depends:
+    R (>= 4.0)
+Imports:
+    JuliaCall,
+    stats,
+    utils
+Suggests:
+    testthat (>= 3.0.0),
+    coda
+Config/testthat/edition: 3
+Config/roxygen2/version: 8.1.0

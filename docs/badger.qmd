@@ -1,0 +1,989 @@
+---
+title: "A badger bovine-TB model in R"
+subtitle: "2384 badgers, 161 quarters, six imperfect tests — specified without writing Julia"
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    code-fold: false
+    code-tools: true
+    df-print: kable
+    theme: cosmo
+execute:
+  eval: false
+  echo: true
+  warning: false
+knitr:
+  opts_chunk:
+    comment: "#>"
+---
+
+```{r}
+#| label: setup
+#| include: false
+library(EpidemicTrajectoriesR)
+```
+
+## What this document is
+
+A worked epidemic model, built twice.
+
+The model is real: 2384 badgers followed over 161 quarters, four states
+(`S → E → I`, with death reachable from any of them), six imperfect diagnostic
+tests, capture-recapture observation, social groups that badgers move between,
+and age-dependent mortality. It is the variant that reproduced the reference
+implementations' mean infectious period.
+
+Everything below is R. The rate and observation functions are ordinary R
+functions; the package translates them to Julia and runs them there, so the
+latent trajectory is resampled once per Gibbs sweep rather than inside every
+gradient evaluation. You can see the Julia at any point with
+`et_julia_source(mod)`.
+
+Where a section shows tabs, the tabs are **alternatives** — different ways to say
+the same thing, or the same model at different levels of tuning. Pick one.
+
+::: {.callout-note collapse="true"}
+## Getting set up
+
+```{r}
+#| eval: false
+# install.packages("remotes")
+remotes::install_github("EvoArt/EpidemicTrajectoriesR")
+
+library(EpidemicTrajectoriesR)
+et_setup()      # starts Julia and resolves its dependencies on first use
+```
+
+`et_setup()` takes a few minutes the first time and is immediate thereafter.
+:::
+
+## The data {#sec-data}
+
+None of this is about the package — it reads the reference's CSVs and converts
+two conventions. Expand it if you want to see the reshaping; skip it otherwise.
+
+::: {.callout-note collapse="true"}
+## Loading and reshaping the CSVs
+
+Two conventions differ from the reference and are converted here:
+
+* the reference is individual-major (`X[i, t]`); this package is time-major
+  (`X[t, i]`)
+* the reference encodes states sparsely (S=0, E=3, I=1, D=9); here a state is
+  its position in the state space, so S=1, E=2, I=3, D=4
+
+The one part that is not mere reshaping is the **repeat-test multiplicities**.
+`TestMat.csv` carries multiple rows for the same (individual, quarter) at 1201
+of 12430 cells, and 150 of those hold *contradictory* readings — genuine repeat
+captures within a quarter, not an export artifact. Flattening them into one slot
+(last row wins) drops real observations. Both reference implementations score
+every row, and `n_neg`/`n_pos` below restore that. It matters: doing it wrong
+moves the estimated mean infectious period from ~14.98 to 16.12.
+
+```{r}
+#| label: load-data
+#| code-fold: true
+BADGER_DATA_DIR <- Sys.getenv("BADGER_DATA_DIR", unset = file.path(
+  path.expand("~"), ".julia", "dev", "EpidemicTrajectories", "badger_ref", "RData2"))
+
+BROCK_CHANGEPOINT_RAW <- 80   # what the raw TestMat columns encode
+BROCK_CHANGEPOINT     <- 101  # what we fix it to
+
+source("../inst/examples/showcase/badger_data.R")
+
+cat(sprintf("%d individuals x %d quarters, %d groups, %d tests\n",
+            raw$n_individuals, raw$n_timepoints, raw$n_groups, raw$n_tests))
+```
+:::
+
+```{r}
+#| label: states
+states <- c("S", "E", "I", "D")
+```
+
+The order fixes the encoding: state `k` in the trajectory means `states[k]`.
+
+## The rates {#sec-rates}
+
+Ordinary R functions of `(model, data, i, t)`. `model` holds the parameters;
+`data` holds everything else, including the tracked arrays declared below and
+anything you passed as an extra.
+
+These come first because everything after them refers to them.
+
+```{r}
+#| label: rates
+# S -> E. A group-level baseline plus a density-dependent term, with `q`
+# interpolating between frequency- and density-dependence.
+infection <- function(model, data, i, t) {
+  g <- data$social_group[i, t]
+  if (g == 0) return(0)
+  infectious <- data$aggregates$n_infectious[g, t]
+  alive      <- data$aggregates$n_alive[g, t]
+  if (alive == 0) return(0)
+  foi <- model$lambda * model$alpha[g] +
+         model$beta * infectious / ((alive / data$K)^model$q)
+  -expm1(-foi)
+}
+
+# E -> I. The Erlang(k, tau/k) CDF at one step, so `tau` is the mean latent
+# period in quarters and `k` its shape.
+progression <- function(model, data, i, t) {
+  x <- data$k / model$tau
+  s <- 1
+  term <- 1
+  for (j in 1:(data$k - 1)) {
+    term <- term * x / j
+    s <- s + term
+  }
+  1 - s * exp(-x)
+}
+
+# Gompertz-Makeham mortality, at the age the badger would reach:
+#     P(survive | age) = exp(-c1 + (a2/b2) * (exp(b2*(age-1)) - exp(b2*age)))
+survival_fn <- function(model, data, i, t) {
+  tt <- t + 1
+  age <- if (tt <= data$n_timepoints) data$age[i, tt]
+         else data$age[i, data$n_timepoints] + (tt - data$n_timepoints)
+  if (age < 0) return(1)
+  y1 <- model$b2 * (age - 1)
+  y2 <- model$b2 * age
+  exp(-model$c1 + (model$a2 / model$b2) * (-exp(y1) * expm1(y2 - y1)))
+}
+```
+
+Where an animal starts, for one already alive when watching began:
+
+```{r}
+#| label: starting-state
+starting_state <- function(model, data, X, i, t) {
+  p <- numeric(data$n_states)
+  st <- data$sampling_period[i][1]
+  nuE <- 0
+  nuI <- 0
+  if (data$birth_time[i] < st) {
+    idx <- 0
+    for (j in 1:length(data$nu_times)) {
+      if (data$nu_times[j] == st) idx <- j
+    }
+    if (idx > 0) {
+      nuE <- model$nu[idx, 1]
+      nuI <- model$nu[idx, 2]
+    }
+  }
+  p[1] <- 1 - nuE - nuI
+  p[2] <- nuE
+  p[3] <- nuI
+  p[4] <- 0
+  p
+}
+```
+
+## Declaring the transitions {#sec-transitions}
+
+This is the part with the most freedom, so it is worth seeing the alternatives
+side by side. **All three tabs describe the same model.** They differ only in how
+much you write out and how much the package fills in.
+
+The first tab is the one this document carries forward; the other two are shown
+for comparison and are not run.
+
+::: {.panel-tabset}
+
+### With `et_survival()` (used here)
+
+Declare the two disease moves and one survival function. `et_survival()` then
+does two things: it scales every non-death rate by the survival probability, and
+it gives **every** live state a transition to `"D"` with the remaining mass —
+including `I → D`, which is never written here.
+
+```{r}
+#| label: trans-survival
+trans <- et_transitions(states,
+  survival = et_survival(survival_fn, death = "D"),
+  "S -> E" = infection,
+  "E -> I" = progression)
+```
+
+Two moves declared, five generated: `S→E`, `E→I`, `S→D`, `E→D`, `I→D`. The
+self-transitions (`S→S`, `E→E`, `I→I`) take whatever probability is left over.
+
+Use this whenever mortality is a competing risk acting on every live state —
+which is the usual case for a survival-structured model.
+
+### Death written out by hand
+
+The same model with no `et_survival()`. Every transition into death is declared
+explicitly, and each disease rate carries its own survival factor.
+
+```{r}
+#| label: trans-manual
+#| eval: false
+death_rate <- function(model, data, i, t) 1 - survival_fn(model, data, i, t)
+
+infection_x_survival <- function(model, data, i, t) {
+  survival_fn(model, data, i, t) * infection(model, data, i, t)
+}
+progression_x_survival <- function(model, data, i, t) {
+  survival_fn(model, data, i, t) * progression(model, data, i, t)
+}
+
+trans_manual <- et_transitions(states,
+  "S -> E" = infection_x_survival,
+  "E -> I" = progression_x_survival,
+  "S -> D" = death_rate,
+  "E -> D" = death_rate,
+  "I -> D" = death_rate)
+```
+
+Identical results, five declarations instead of two, and `I → D` is now yours to
+remember. Worth it only when death is not a uniform competing risk — say if
+being infectious changed the *form* of the mortality model rather than just its
+rate.
+
+### Self-transitions written out
+
+By default each state's self-transition takes the leftover probability mass, so
+rows sum to one. You can turn that off and declare them yourself:
+
+```{r}
+#| label: trans-noself
+#| eval: false
+stay_S <- function(model, data, i, t) {
+  survival_fn(model, data, i, t) * (1 - infection(model, data, i, t))
+}
+stay_E <- function(model, data, i, t) {
+  survival_fn(model, data, i, t) * (1 - progression(model, data, i, t))
+}
+stay_I <- function(model, data, i, t) survival_fn(model, data, i, t)
+stay_D <- function(model, data, i, t) 1
+
+trans_noself <- et_transitions(states,
+  auto_self = FALSE,
+  "S -> E" = infection_x_survival,
+  "E -> I" = progression_x_survival,
+  "S -> S" = stay_S,
+  "E -> E" = stay_E,
+  "I -> I" = stay_I,
+  "D -> D" = stay_D,
+  "S -> D" = death_rate,
+  "E -> D" = death_rate,
+  "I -> D" = death_rate)
+```
+
+Ten declarations for the same four-state model, and now **you** are responsible
+for each row summing to one — an arithmetic slip gives an improper transition
+matrix rather than an error.
+
+Reach for this only when a self-transition is genuinely not the residual
+probability: an absorbing state with its own dynamics, or a model where staying
+put has a rate that is not one minus everything else.
+
+:::
+
+## Tracked arrays {#sec-aggregates}
+
+The force of infection needs to know how many groupmates are infectious and how
+many are alive. You declare the arrays and how they update; the package
+allocates them and keeps them in step with the trajectory.
+
+The reason it needs the *update* rather than just the array is that the sampler
+must be able to take one individual's contribution back out, resample it, and
+put it back — which is what gives each individual the leave-one-out count its
+force of infection wants. So every update has to be reversible.
+
+The tuned build later needs two extra arrays, so both versions are shown. The
+second is the one carried forward.
+
+::: {.panel-tabset}
+
+### Derived reverse (enough for the plain build)
+
+Write the update in the shape `A[idx] <- A[idx] + contribution` and the package
+derives the reverse for you. It cannot be got wrong.
+
+```{r}
+#| label: aggs-simple
+#| eval: false
+aggs_simple <- et_aggregate(
+  states,
+  arrays = list(
+    n_infectious = et_array("Int", c(raw$n_groups, raw$n_timepoints)),
+    n_alive      = et_array("Int", c(raw$n_groups, raw$n_timepoints))),
+  update = function(model, data, X, state, i, t) {
+    if (data$social_group[i, t] > 0) {
+      n_infectious[data$social_group[i, t], t] <-
+        n_infectious[data$social_group[i, t], t] + (state == "I")
+    }
+    if (data$social_group[i, t] > 0) {
+      n_alive[data$social_group[i, t], t] <-
+        n_alive[data$social_group[i, t], t] + (state != "D")
+    }
+  })
+```
+
+Anything outside that shape is refused rather than guessed at — a wrong reverse
+would silently desynchronise the arrays from the trajectory.
+
+### Adding a hand-written reverse (used here)
+
+Some updates cannot be expressed that way. The tuned coupling below needs counts
+of how many susceptible badgers went on to `E` (and to `S`) at each step — a
+contribution that depends on where the individual goes **next**, which the
+`A[i] <- A[i] + x` shape does not expose.
+
+`et_summary()` takes the whole update, including its reverse. `et_aggregates()`
+mixes the two kinds:
+
+```{r}
+#| label: aggs-hand
+aggs <- et_aggregates(
+  states,
+  arrays = list(
+    n_infectious = et_array("Int", c(raw$n_groups, raw$n_timepoints)),
+    n_alive      = et_array("Int", c(raw$n_groups, raw$n_timepoints)),
+
+    nSE = et_summary("Int", c(raw$n_groups, raw$n_timepoints),
+      update = function(model, data, X, state, i, t, reverse) {
+        g <- data$social_group[i, t]
+        if (g > 0 && t < data$n_timepoints) {
+          contrib <- (state == "S") && (X[t + 1, i] == "E")
+          if (reverse) {
+            nSE[g, t] <- nSE[g, t] - contrib
+          } else {
+            nSE[g, t] <- nSE[g, t] + contrib
+          }
+        }
+      }),
+
+    nSS = et_summary("Int", c(raw$n_groups, raw$n_timepoints),
+      update = function(model, data, X, state, i, t, reverse) {
+        g <- data$social_group[i, t]
+        if (g > 0 && t < data$n_timepoints) {
+          contrib <- (state == "S") && (X[t + 1, i] == "S")
+          if (reverse) {
+            nSS[g, t] <- nSS[g, t] - contrib
+          } else {
+            nSS[g, t] <- nSS[g, t] + contrib
+          }
+        }
+      })),
+
+  update = function(model, data, X, state, i, t) {
+    if (data$social_group[i, t] > 0) {
+      n_infectious[data$social_group[i, t], t] <-
+        n_infectious[data$social_group[i, t], t] + (state == "I")
+    }
+    if (data$social_group[i, t] > 0) {
+      n_alive[data$social_group[i, t], t] <-
+        n_alive[data$social_group[i, t], t] + (state != "D")
+    }
+  })
+```
+
+You are now responsible for the reverse exactly undoing the forward update.
+Nothing checks it, and getting it wrong fails silently.
+
+::: {.callout-warning}
+`state == "S"` and `X[t + 1, i] == "E"` look alike and are **not** the same
+comparison. `state` is the state being applied, so it compares by name;
+`X[t + 1, i]` is the trajectory, which holds integer codes, so the name resolves
+to its index. The package handles both, and refuses a name your state space does
+not contain — otherwise that comparison would simply never match.
+:::
+
+:::
+
+## The observation process {#sec-observation}
+
+Capture × tests. A badger that was not caught is not tested; one caught later
+cannot have been dead now.
+
+The weight for a state is a **product of two factors**: whether the badger was
+caught, and what its tests said. That product is why the next section can split
+them.
+
+```{r}
+#| label: obs-tests
+# Tests only, one state at a time. No array allocated per cell.
+#
+# Each READING is scored once, via the repeat-capture multiplicities from
+# @sec-data. theta is sensitivity in I, theta*rho in E, phi is specificity in S.
+#
+# et_one() rather than 1: `w` accumulates a product of test-parameter terms, so
+# it must start at the parameter scalar type. Starting at an integer would make
+# the accumulator a union type the moment a parameter multiplied into it.
+tests_weight <- function(model, data, X, i, t, s) {
+  if (data$capture[t, i] == 0) return(1)
+  if (s == 4) return(1)
+  w <- et_one()
+  for (j in 1:dim(data$tests)[3]) {
+    nneg <- data$n_neg[t, i, j]
+    npos <- data$n_pos[t, i, j]
+    if (nneg + npos > 0) {
+      if (s == 1) {
+        phi <- model$phis[j]
+        if (npos > 0) w <- w * (1 - phi)^npos
+        if (nneg > 0) w <- w * phi^nneg
+      } else if (s == 2) {
+        tr <- model$thetas[j] * model$rhos[j]
+        if (npos > 0) w <- w * tr^npos
+        if (nneg > 0) w <- w * (1 - tr)^nneg
+      } else {
+        th <- model$thetas[j]
+        if (npos > 0) w <- w * th^npos
+        if (nneg > 0) w <- w * (1 - th)^nneg
+      }
+    }
+  }
+  w
+}
+
+# capture x tests: the whole weight for state `s`.
+observation <- function(model, data, X, i, t, s) {
+  eta <- model$etas[data$season[t]]
+  capture_w <- if (data$capture[t, i] == 0) {
+    if (s == 4) ifelse(t <= data$last_capture_time[i], 0, 1) else 1 - eta
+  } else {
+    ifelse(s == 4, 0, eta)
+  }
+  capture_w * tests_weight(model, data, X, i, t, s)
+}
+```
+
+### Why the likelihood scores only one of the two factors
+
+The **filter** needs both factors. It must know that a non-capture is
+informative, and that a badger caught later cannot have been dead earlier.
+
+The **likelihood** must score the tests factor *only*. `etas` — the capture
+probabilities — is drawn by an exact conjugate kernel, so if the likelihood also
+scored capture, `etas` would be counted twice: once by its own kernel, and again
+through the gradient.
+
+Because the weights **multiply**, dropping a factor from the likelihood drops
+exactly its term and nothing else. That is why the two are separate arguments,
+and it is exact rather than an approximation:
+
+```{r}
+#| label: obs-split-note
+#| eval: false
+# in et_data():
+#   observation_weight = observation      # filter:     capture x tests
+#   likelihood_weight  = tests_weight     # likelihood: tests only
+```
+
+This is also what keeps `etas` out of the derived dependency list — see
+@sec-depends.
+
+## The tuned coupling {#sec-coupling}
+
+This is the one place the R interface hands over to Julia, deliberately. The
+closed form assumes a single coupled transition with a per-group
+frequency-dependent force of infection — a modelling choice that cannot be
+inferred from the spec.
+
+`et_julia()` accepts literal Julia anywhere a transpiled R function is accepted,
+and reads the same tracked arrays the R code declared above.
+
+```{r}
+#| label: coupling
+coupling <- et_julia('
+    t == data.n_timepoints && return ones(n_states)
+    g = data.social_group[i, t]
+    g == 0 && return ones(n_states)
+    I_minus = data.aggregates.n_infectious[g, t]
+    M_minus = data.aggregates.n_alive[g, t]
+    nSE, nSS = data.aggregates.nSE[g, t], data.aggregates.nSS[g, t]
+    logw = zeros(Float64, n_states)
+    @inbounds for s in 1:n_states
+        # The focal was reversed out of the aggregates for its own resample, so
+        # its own contribution to the denominator is added back per candidate.
+        I, M = s == 3 ? (I_minus + 1, M_minus + 1) :
+               s == 4 ? (I_minus, M_minus) : (I_minus, M_minus + 1)
+        foi = M == 0 ? 0.0 :
+              -expm1(-(model.lambda * model.alpha[g] +
+                       model.beta * I / ((M / data.K)^model.q)))
+        logw[s] = nSE * log(max(foi, 1e-12)) + nSS * log(max(1.0 - foi, 1e-12))
+    end
+    logw .-= maximum(logw)          # stabilise before exponentiating
+    return exp.(logw)
+')
+```
+
+The default coupling recomputes, for each candidate state of the focal
+individual, how probable every affected neighbour's realised move is. Keeping
+per-(group, time) running totals of the `S → E` and `S → S` moves turns that
+into a closed form in those totals, with no neighbour loop at all.
+
+## Assembling {#sec-assemble}
+
+Everything the package does not name is yours: pass it in `extras` and read it
+back as `data$whatever` inside any function above.
+
+The four tuning choices are marked. Each is exact, not an approximation.
+
+```{r}
+#| label: build-data
+dat <- et_data(
+  n_individuals  = raw$n_individuals,
+  n_timepoints   = raw$n_timepoints,
+  transitions    = trans,
+  starting_state = starting_state,
+  aggregates     = aggs,
+  observation_weight  = observation,      # filter:     capture x tests
+  likelihood_weight   = tests_weight,     # likelihood: tests only    (2)
+  rest_contribution   = coupling,         # O(n_states) coupling      (3)
+  coupled_transitions = list(c("S", "E")),                         # (1)
+  sampling_period     = raw$sampling_period,
+  # Badgers move between groups, so who each one affects varies with time.
+  affected_individuals = et_affected_from_groups(raw$social_group),
+  helpers = list(et_helper(tests_weight, "tests_weight")),
+  extras = list(
+    social_group = raw$social_group, age = raw$age, capture = raw$capture,
+    capt_effort = raw$capt_effort, tests = raw$tests,
+    n_neg = raw$n_neg, n_pos = raw$n_pos, season = raw$season,
+    birth_time = raw$birth_time, nu_times = raw$nu_times,
+    last_capture_time = raw$last_capture_time,
+    first_capture_time = raw$first_capture_time,
+    K = raw$K, k = raw$k))
+```
+
+1. **`coupled_transitions`** — the only way one badger changes another's fate is
+   by contributing to its force of infection. A neighbour whose realised move is
+   not `S → E` has the same probability whatever the focal does, so it cancels
+   on normalisation and can be skipped.
+2. **`likelihood_weight`** — one entry of the weight vector rather than the whole
+   array, and here a different factor besides (@sec-observation).
+3. **`rest_contribution`** — the closed form from @sec-coupling.
+4. **The `depends=` split** — @sec-depends. You do not write it.
+
+Now the parameters and priors. `et_exponential()` takes a **rate**; Julia's
+`Exponential` is parameterised by scale, and the package converts. `nu` is owned
+by a conjugate kernel, so it is declared `"latent"`: a placeholder density, with
+the real draw coming from the kernel.
+
+```{r}
+#| label: build-model
+mod <- et_model(
+  data = dat,
+  parameters = list(
+    tau    = et_par(et_exponential(1 / 100), init = 5.0),
+    alpha  = et_par(et_exponential(1), init = rep(0.5, raw$n_groups),
+                    n = raw$n_groups),
+    lambda = et_par(et_exponential(1), init = 0.5),
+    beta   = et_par(et_exponential(1), init = 0.3),
+    q      = et_par(et_beta(1, 1), init = 0.2),
+
+    c1 = et_par(et_exponential(1), init = 0.45),   # Makeham constant
+    a2 = et_par(et_exponential(1), init = 0.05),   # Gompertz scale
+    b2 = et_par(et_exponential(1), init = 0.3),    # Gompertz rate
+
+    thetas = et_par(et_beta(1, 1), init = rep(0.3, raw$n_tests), n = raw$n_tests),
+    rhos   = et_par(et_beta(1, 1), init = rep(0.5, raw$n_tests), n = raw$n_tests),
+    phis   = et_par(et_beta(1, 1), init = rep(0.5, raw$n_tests), n = raw$n_tests),
+    etas   = et_par(et_beta(1, 1), init = rep(0.3, raw$n_seasons),
+                    n = raw$n_seasons),
+    nu     = et_par(init = rep(0.05, raw$n_nu_times * 2),
+                    dim = c(raw$n_nu_times, 2), kind = "latent")),
+  # Entry gate: a badger is known alive at first capture, but its disease
+  # dynamics before then were not watched. The likelihood scores the disease
+  # moves pre-entry and divides the survival factor back out.
+  entry_time = "first_capture_time")
+```
+
+And the sampler. `et_adaptive_hmc()` is a fixed-trajectory HMC block that adapts
+its mass matrix and step size during warm-up — exactly as NUTS does — and then
+holds both fixed for sampling. Every iteration costs a constant `n_steps`
+leapfrog steps, so the run has a flat, predictable cost and never doubles a tree.
+
+`n_steps = 15` matches the C++ reference's *expected* trajectory length (it draws
+L uniform on 1..30, mean 15.5), not its nominal 30. `metric = "dense"` learns
+correlations between parameters, which costs more warm-up but suits a posterior
+where the epidemic parameters trade off against one another.
+
+::: {.callout-warning}
+## Why not a hand-tuned metric
+
+`et_hmc()` takes a fixed metric you supply. That has to be right in both **order**
+and **scale**, and a scale far too small produces a chain that **never moves**
+while every acceptance diagnostic still looks healthy — silence rather than an
+error.
+
+That is not hypothetical: the hand-tuned metric originally used here was carried
+over from a different variant of this model and left the block completely frozen,
+with `sd = 0` on every parameter. Adapting removes the failure mode.
+:::
+
+```{r}
+#| label: build-blocks
+blocks <- list(
+  et_adaptive_hmc(c("tau", "alpha", "lambda", "beta", "q", "c1", "a2", "b2",
+                    "thetas", "rhos", "phis"),
+                  target_accept = 0.8, n_steps = 15, metric = "dense"),
+
+  # Closed-form conditionals: an exact independent draw beats a correlated HMC
+  # step, so these do not go in the block above.
+  et_conjugate_capture_prob("etas",
+    caught = "capture", effort = "capt_effort", group = "social_group",
+    index  = "season", dead_state = "D", n = raw$n_seasons),
+
+  et_conjugate_initial_state("nu",
+    at = "nu_times", states = c("S", "E", "I"), n = raw$n_nu_times,
+    eligible = function(X, data, i, t) {
+      data$sampling_period[i][1] == t && data$birth_time[i] < t
+    }),
+
+  et_iffbs("X"))
+```
+
+::: {.callout-note collapse="true"}
+## The plain build, for comparison
+
+Everything above is the tuned build. The plain one differs in exactly four
+lines: it hands `et_data()` a vector-returning `observation_process` instead of
+the split weights, drops `rest_contribution` and `coupled_transitions`, uses
+`aggs_simple` (no `nSE`/`nSS`), and swaps the hand-tuned HMC block for
+`et_nuts()`.
+
+```{r}
+#| label: build-friendly
+#| eval: false
+dat_plain <- et_data(
+  n_individuals  = raw$n_individuals,
+  n_timepoints   = raw$n_timepoints,
+  transitions    = trans,
+  starting_state = starting_state,
+  aggregates     = aggs_simple,
+  observation_process  = observation_vector,   # the vector-returning form
+  sampling_period      = raw$sampling_period,
+  affected_individuals = et_affected_from_groups(raw$social_group),
+  extras = list(
+    social_group = raw$social_group, age = raw$age, capture = raw$capture,
+    capt_effort = raw$capt_effort, tests = raw$tests,
+    n_neg = raw$n_neg, n_pos = raw$n_pos, season = raw$season,
+    birth_time = raw$birth_time, nu_times = raw$nu_times,
+    last_capture_time = raw$last_capture_time,
+    first_capture_time = raw$first_capture_time,
+    K = raw$K, k = raw$k))
+
+blocks_plain <- list(
+  et_nuts(c("tau", "alpha", "lambda", "beta", "q", "c1", "a2", "b2",
+            "thetas", "rhos", "phis")),
+  et_conjugate_capture_prob("etas",
+    caught = "capture", effort = "capt_effort", group = "social_group",
+    index  = "season", dead_state = "D", n = raw$n_seasons),
+  et_conjugate_initial_state("nu",
+    at = "nu_times", states = c("S", "E", "I"), n = raw$n_nu_times),
+  et_iffbs("X"))
+```
+
+You could drop `blocks` entirely: every parameter would go into one NUTS block
+and the trajectory would still get iFFBS. It is spelled out because the two
+conjugate kernels are worth having.
+
+The full plain build is in `inst/examples/showcase/badger_friendly.R`.
+:::
+
+## Dependencies you do not have to declare {#sec-depends}
+
+Each Gibbs block can skip likelihood terms its parameters cannot move. That is a
+large saving and a sharp edge: getting the list wrong drops a real gradient
+contribution with **no error and no warning**.
+
+You do not write the list. The package reads which `model$x` each of your
+functions touches — following your helpers — and emits it:
+
+```{r}
+#| label: depends
+#| eval: false
+src <- et_julia_source(mod, blocks)
+src$depends
+```
+
+For the two builds above:
+
+| build | epidemic term | observation term |
+|---|---|---|
+| friendly | `tau alpha lambda beta q c1 a2 b2 nu X` | `thetas rhos phis` **`etas`** `X` |
+| tuned | `tau alpha lambda beta q c1 a2 b2 nu X` | `thetas rhos phis X` |
+
+The difference is the whole point of splitting the observation process.
+`etas` reaches the *filter*, which is never differentiated, and never reaches
+the likelihood — so it drops out, and cannot be double-counted against its own
+conjugate kernel. Nobody wrote either list.
+
+Verify before trusting a gradient:
+
+```{r}
+#| label: check-depends
+#| eval: false
+dep <- et_check_depends(mod, blocks, x_init = raw$X_init)
+subset(dep, verdict != "ok")
+```
+
+This perturbs each parameter and checks that no term it was excluded from
+actually moves. It is a probe rather than a proof — a dependency inactive at the
+tested values would pass — but it turns a silent failure into a loud one.
+
+## Fitting {#sec-fit}
+
+```{r}
+#| label: fit
+#| eval: false
+et_setup()
+
+# A cheap structural check first: a non-finite log density means the model is
+# misspecified before any sampler is involved.
+ll <- et_loglik(mod, blocks, x_init = raw$X_init)
+stopifnot(all(is.finite(ll)))
+
+fit <- et_sample(mod, blocks,
+                 n_sweeps = 5000, n_adapts = 1000, seed = 13,
+                 x_init = raw$X_init,
+                 save_x = "badger_X.jld2", save_every = 100)
+
+summary(fit)
+```
+
+::: {.callout-important}
+`save_x` streams the latent trajectory to disc. It is 161 × 2384 integers
+**every sweep**, so it is always kept live for conditioning but never carried in
+the chain object. Without `save_x` the per-sweep copy is simply dropped, which
+is the right default — you only need it for the residuals below.
+
+**`save_every` is a flush interval, not thinning.** Every sweep is archived
+either way; `save_every` only sets how many are buffered before a file is
+written, and each flush gets its own file. At 5000 sweeps this model's archive is
+therefore about **15 GB** (161 × 2384 `Int64` = 3.1 MB per draw), across 50
+files. There is no thinning option in the stack today, so either budget the disc
+or use [`et_collect()`](#sec-online), which scores the residuals during the fit
+and never stores a trajectory at all.
+:::
+
+## Residuals {#sec-residuals}
+
+A fit tells you what the parameters are. A residual tells you whether the model
+that produced them is any good.
+
+Each is a PIT residual: **Uniform(0, 1) if the mechanism it targets is right**.
+A departure from uniformity therefore points at that specific mechanism, rather
+than saying "the model is bad" in general.
+
+::: {.panel-tabset}
+
+### None
+
+Perfectly reasonable. Nothing extra to declare, and `et_sample()` drops the
+per-sweep trajectory rather than storing it.
+
+```{r}
+#| label: resid-none
+#| eval: false
+fit <- et_sample(mod, blocks, n_sweeps = 5000, n_adapts = 1000, seed = 13,
+                 x_init = raw$X_init)
+summary(fit)
+```
+
+### Post-hoc (recommended)
+
+Archive the trajectory during the fit, score it afterwards. New residuals can be
+added later without refitting.
+
+```{r}
+#| label: resid-posthoc
+#| eval: false
+fit <- et_sample(mod, blocks, n_sweeps = 5000, n_adapts = 1000, seed = 13,
+                 x_init = raw$X_init,
+                 save_x = "badger_X.jld2", save_every = 100)
+
+residuals_spec <- list(
+  # How long a badger LIVES, against Gompertz-Makeham.
+  et_residual_survival(
+    origin       = "birth_time",
+    condition_on = "first_capture_time",
+    censor_at    = "last_capture_time",
+    death        = "D", name = "survival"),
+
+  # How long a SUSCEPTIBLE badger waits before infection.
+  et_residual_waiting("S", "E",
+    origin = "window_start", censor_at = c("window_end", "D"),
+    accumulate = "discrete_product", name = "exposure"),
+
+  # How long an EXPOSED badger takes to become infectious - the residual for tau.
+  et_residual_waiting("E", "I",
+    origin = "entry_to_from_state", censor_at = c("window_end", "D"),
+    accumulate = "discrete_product", name = "latent_period"))
+
+res <- et_residuals(fit, residuals_spec, sync_aggregates = TRUE)
+et_residual_summary(res)
+```
+
+`sync_aggregates` rebuilds the tracked arrays for each draw before scoring it.
+It is needed here because the force of infection reads them, so a spec-derived
+hazard depends on them agreeing with *that draw's* trajectory rather than
+whatever was current when the fit ended.
+
+### Streamed during sampling {#sec-online}
+
+When the trajectories are too large to keep even on disc, score them as they are
+produced and never store them. `et_collect()` fits and scores in one call:
+
+```{r}
+#| label: resid-stream
+#| eval: false
+out <- et_collect(mod, blocks, residuals_spec,
+                  n_sweeps = 5000, n_adapts = 1000, seed = 13,
+                  x_init = raw$X_init,
+                  n_keep = 500)
+
+et_residual_summary(out$residuals)
+summary(out$fit)
+```
+
+Storage is `n_individuals x n_keep` doubles per residual — for this model about
+9.5 MB each, against the ~15 GB of trajectories `save_x` would archive. Nothing
+is written to disc and no trajectory is ever kept.
+
+The trade is that the residuals must be decided **before** the fit. Archiving
+lets you add new ones afterwards without refitting; this does not. So use
+`save_x` while you are still deciding what to look at, and `et_collect()` once
+you know.
+
+:::
+
+### Reading the result
+
+`et_residual_summary()` reports the mean and the share of values in each
+quartile:
+
+| | what it means |
+|---|---|
+| mean ≈ 0.5, quartiles ≈ 0.25 each | no evidence of misfit in that mechanism |
+| mean pushed high | events happening **later** than the model expects |
+| mean pushed low | events happening **earlier** than the model expects |
+| mass piled at one end | the mechanism is wrong in shape, not just scale |
+
+::: {.callout-warning}
+Residuals from a short or unconverged chain mean nothing. They are diagnostics
+of a *fitted* model, so read them only after the chain has converged.
+:::
+
+::: {.callout-note collapse="true"}
+## Are the residuals tied to this model?
+
+No. `death = "D"` is a name resolved against your declared state space, not a
+constant — a model with `c("Alive", "Dead")` passes `death = "Dead"`, and one
+with no death state does not use that residual at all.
+
+The waiting-time residual is more general still: it derives its per-step hazard
+from your transitions, so **any** declared move gets a residual for free. `S → E`,
+`E → I`, `I → R`, `Exposed → Symptomatic` — no new code.
+
+One thing genuinely has no default. `accumulate` must be stated, because
+`"discrete_product"` and `"cumulative_hazard"` agree only when the per-step
+probability is `1 - exp(-hazard)`. Choosing wrong is a silent miscalibration, so
+the package will not guess.
+:::
+
+## Who infected whom: R~i~ {#sec-ri}
+
+A residual asks whether the model fits. This asks something else: **how many
+secondary infections did each badger cause?**
+
+```{r}
+#| label: reproduction-numbers
+#| eval: false
+# The force of infection, split into the parts you want attributed separately.
+# These are ordinary rate functions -- the same subset, the same
+# (model, data, i, t) contract as anything in et_transitions().
+background <- function(model, data, i, t) {
+  g <- data$social_group[i, t]
+  if (g == 0) return(0)
+  model$lambda * model$alpha[g]
+}
+
+transmission <- function(model, data, i, t) {
+  g <- data$social_group[i, t]
+  if (g == 0) return(0)
+  alive <- data$aggregates$n_alive[g, t]
+  if (alive == 0) return(0)
+  model$beta * data$aggregates$n_infectious[g, t] / ((alive / data$K)^model$q)
+}
+
+R_i <- et_reproduction_numbers(fit,
+  components = list(background = background, transmission = transmission),
+  secondary  = "transmission",     # the part attributable to other badgers
+  infection  = c("S", "E"),
+  infectious_state = "I")
+
+aggregate(value ~ individual, R_i, mean, na.rm = TRUE) |> head()
+```
+
+::: {.callout-note}
+## Why you declare the split rather than the package deriving it
+
+`S → E` is **one** rate function returning **one** number, and nothing in it says
+which part is background and which is transmission. The package cannot take it
+apart, so you name the components and say which one is transmission. It sums
+them, normalises, and never needs to know what any of them means — the same
+bargain as aggregates and rates.
+
+That also buys generality for free: the split is defined for any number of
+components, so per-neighbour attribution ("which badger infected this one") is
+just a longer list.
+:::
+
+For each infection, the transmission share of the victim's force of infection is
+divided among the infectives in its group. Background infections are attributed
+to nobody — that is the point of the split. A badger that was never infectious
+gets `NA`: it never had the opportunity, which is different from having had it
+and infected nobody (a genuine `0`).
+
+::: {.callout-important}
+Unlike every other quantity here, R~i~ is **not** computed one individual at a
+time — attributing an infection needs every infective present in the group at
+that moment. So it takes a whole-population pass and has its own entry point
+rather than joining `et_residuals()`.
+:::
+
+## Seeing the Julia {#sec-julia}
+
+The generated module is a first-class artefact, not a hidden intermediate. It is
+commented, it runs standalone, and it is what to show a Julia-literate colleague
+when something goes wrong.
+
+```{r}
+#| label: source
+#| eval: false
+et_julia_source(mod, blocks)   # print the module
+et_source(fit)                 # the module behind a fit
+et_eval("...")                 # run anything in the session
+```
+
+## Reproducing the reference {#sec-reference}
+
+This is the **Gompertz-Makeham** variant with the **repeat-test fix** — the pair
+that reproduced the reference implementations:
+
+| implementation | mean infectious period |
+|---|---|
+| upstream C++ | 15.06 |
+| **this model** | **14.98** (sd 1.76, ESS 403, MCSE 0.088, Rhat 1.003) |
+| semi-Markov reference | 14.87 |
+
+Both differences are inside Monte Carlo error. Two earlier variants were not:
+before the repeat-test fix it read 16.12, and before the changepoint fix, 14.10.
+
+::: {.callout-important}
+## One limitation, stated plainly
+
+The Brock changepoint `ξ` is sampled in the reference by a bespoke Metropolis
+kernel — an in-place swap of the test columns plus a windowed acceptance ratio —
+which the R interface cannot yet express. This document **fixes it at 101**.
+
+The posterior for `ξ` visits only 100–102 (98.9% at 100–101), so that is close to
+its mode, but it is a fixed-`ξ` run rather than the sampled-`ξ` run that produced
+the number above.
+:::

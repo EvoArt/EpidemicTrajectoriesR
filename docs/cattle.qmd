@@ -1,0 +1,533 @@
+---
+title: "A cattle E. coli model, in R and in Julia"
+subtitle: "The same model written both ways, side by side"
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    code-fold: false
+    code-tools: true
+    df-print: kable
+    theme: cosmo
+execute:
+  eval: false
+  echo: true
+  warning: false
+knitr:
+  opts_chunk:
+    comment: "#>"
+---
+
+## What this document is
+
+One small model, written twice: once in R, once in Julia. Every code block below
+has both, and **the tabs are the same model** — pick whichever language you work
+in.
+
+The point is not that the two look similar (they do), but that the *shape* of the
+specification is identical. If you learn it in one language you have learned it
+in the other, and a model prototyped in R can graduate to Julia without being
+rethought.
+
+The model is deliberately small and readable. Where the badger document
+optimises, this one does not: it is about how little you have to write.
+
+### The model
+
+Two states, `S` and `I`, with recurrent `S ⇄ I`. An animal is infected at a rate
+driven by how many of its penmates are infected, and recovers back to
+susceptible.
+
+Neither state is ever observed. All we see are two imperfect diagnostic tests,
+on a subset of days — so the trajectory is entirely latent, and inferring it is
+the whole problem.
+
+This is the E. coli cattle model of Touloupou et al. (2019).
+
+## Setting up
+
+::: {.panel-tabset}
+
+### R
+
+```{r}
+#| eval: false
+# install.packages("remotes")
+remotes::install_github("EvoArt/EpidemicTrajectoriesR")
+
+library(EpidemicTrajectoriesR)
+et_setup()      # starts Julia and resolves its dependencies on first use
+```
+
+### Julia
+
+```julia
+using Pkg
+Pkg.add(url = "https://github.com/EvoArt/EpidemicTrajectories.jl")
+Pkg.add(url = "https://github.com/EvoArt/PracticalBayes.jl")
+Pkg.add(url = "https://github.com/EvoArt/PracticalEpiBayes.jl")
+
+using EpidemicTrajectories, PracticalBayes, PracticalEpiBayes
+using Distributions, Random, StableRNGs
+import AbstractMCMC
+```
+
+:::
+
+## The problem size
+
+::: {.panel-tabset}
+
+### R
+
+```{r}
+#| label: size-r
+n_pens        <- 10
+n_per_pen     <- 8
+n_timepoints  <- 80
+n_individuals <- n_pens * n_per_pen
+group         <- rep(seq_len(n_pens), each = n_per_pen)
+observed_days <- seq(1, n_timepoints, by = 6)
+
+states <- c("S", "I")
+```
+
+### Julia
+
+```julia
+n_pens        = 10
+n_per_pen     = 8
+n_timepoints  = 80
+n_individuals = n_pens * n_per_pen
+group         = repeat(1:n_pens; inner = n_per_pen)
+observed_days = collect(1:6:n_timepoints)
+
+state_space = [:S, :I]
+```
+
+:::
+
+Declaring the state space fixes the numbering, so you and the package agree on
+which state is which: `S` is 1, `I` is 2.
+
+## What to track
+
+The force of infection needs to know how many penmates are infected. Declare the
+array and how it updates; the package allocates it and keeps it in step with the
+trajectory.
+
+It needs the *update* rather than just the array because the sampler must be
+able to take one animal's contribution back out, resample it, and put it back —
+which is what gives each animal the leave-one-out count its force of infection
+wants.
+
+::: {.panel-tabset}
+
+### R
+
+```{r}
+#| label: aggs-r
+aggs <- et_aggregate(
+  states,
+  arrays = list(n_infected = et_array("Int", c(n_pens, n_timepoints))),
+  update = function(model, data, X, state, i, t) {
+    n_infected[data$group[i], t] <- n_infected[data$group[i], t] + (state == "I")
+  })
+```
+
+### Julia
+
+```julia
+aggs = @aggregate state_space begin
+    @array n_infected Int (n_pens, n_timepoints)
+    n_infected[data.group[i], t] += (state == :I)
+end
+```
+
+:::
+
+The package attaches no meaning to this array. It is whatever your rates need.
+
+## The rates
+
+Ordinary functions of `(model, data, i, t)`. `model` holds the parameters; `data`
+holds everything else, including the tracked array above.
+
+::: {.panel-tabset}
+
+### R
+
+```{r}
+#| label: rates-r
+infection <- function(model, data, i, t) {
+  I_minus <- data$aggregates$n_infected[data$group[i], t]
+  -expm1(-(model$alpha + model$beta * I_minus))
+}
+
+recovery <- function(model, data, i, t) 1 / model$m
+```
+
+### Julia
+
+```julia
+function infection(model, data, i, t)
+    I_minus = data.aggregates.n_infected[data.group[i], t]
+    -expm1(-(model.α + model.β * I_minus))
+end
+
+recovery(model, data, i, t) = 1 / model.m
+```
+
+:::
+
+`n_infected` excludes the animal currently being resampled, which is exactly the
+leave-one-out count the force of infection needs — you get that for free from
+having declared a reversible update.
+
+## The transitions
+
+::: {.panel-tabset}
+
+### R
+
+```{r}
+#| label: trans-r
+trans <- et_transitions(states,
+  "S -> I" = infection,
+  "I -> S" = recovery)
+```
+
+### Julia
+
+```julia
+trans_mat = @transitions state_space begin
+    S -> I = infection
+    I -> S = recovery
+end
+```
+
+:::
+
+Two moves declared. The self-transitions (`S→S`, `I→I`) take whatever
+probability is left over, so the rows sum to one without your having to say so.
+
+## Where an animal starts
+
+::: {.panel-tabset}
+
+### R
+
+```{r}
+#| label: start-r
+starting_state <- function(model, data, X, i, t) {
+  p <- numeric(data$n_states)
+  p[1] <- 1 - model$nu
+  p[2] <- model$nu
+  p
+}
+```
+
+### Julia
+
+```julia
+starting_state(model, data, X, i, t) = [1 - model.ν, model.ν]
+```
+
+:::
+
+## What we observe
+
+Two imperfect tests, each with its own sensitivity and perfect specificity. A
+negative entry means the animal was not tested that day, so the result says
+nothing.
+
+The package knows none of this — it just multiplies these weights into the
+filter.
+
+::: {.panel-tabset}
+
+### R
+
+```{r}
+#| label: obs-r
+cattle_observations <- function(model, data, X, i, t) {
+  w <- rep(1, data$n_states)
+
+  y <- data$rams[t, i]
+  if (y >= 0) {
+    w[1] <- w[1] * ifelse(y == 1, 0, 1)                          # S never tests +
+    w[2] <- w[2] * ifelse(y == 1, model$theta_r, 1 - model$theta_r)
+  }
+
+  y <- data$faecal[t, i]
+  if (y >= 0) {
+    w[1] <- w[1] * ifelse(y == 1, 0, 1)
+    w[2] <- w[2] * ifelse(y == 1, model$theta_f, 1 - model$theta_f)
+  }
+  w
+}
+```
+
+### Julia
+
+```julia
+function cattle_observations(model, data, X, i, t)
+    w = ones(eltype(model.θʳ), data.n_states)
+    for (results, θ) in ((data.rams, model.θʳ), (data.faecal, model.θᶠ))
+        y = results[t, i]
+        y < 0 && continue                       # not tested
+        w[1] *= y == 1 ? 0.0 : 1.0              # S never tests positive
+        w[2] *= y == 1 ? θ : (1 - θ)
+    end
+    w
+end
+```
+
+:::
+
+::: {.callout-note}
+## One thing worth knowing in both languages
+
+`rep(1, data$n_states)` in R, and `ones(eltype(model.θʳ), ...)` in Julia, do the
+same job: allocate at the **parameter's** scalar type rather than at `Float64`.
+
+This matters because that type depends on the *blocking*, not the model. When a
+test sensitivity is sampled conjugately it is a plain number; when it sits in an
+HMC block it is whatever the autodiff backend uses. Writing `zeros(Float64, ...)`
+works until someone moves a parameter between blocks, and then throws.
+
+In R the package handles it — `rep(1, n)` is translated appropriately. In Julia
+you write it yourself, which is why the idiom is `eltype(model.something)` rather
+than a literal type.
+:::
+
+## Assembling
+
+::: {.panel-tabset}
+
+### R
+
+```{r}
+#| label: data-r
+dat <- et_data(
+  n_individuals  = n_individuals,
+  n_timepoints   = n_timepoints,
+  transitions    = trans,
+  starting_state = starting_state,
+  aggregates     = aggs,
+  group          = group,
+  observation_process = cattle_observations,
+  # your own data, reachable as data$rams / data$faecal above
+  extras = list(rams = rams, faecal = faecal))
+```
+
+### Julia
+
+```julia
+data = epidemic_data(
+    n_individuals = n_individuals,
+    n_timepoints  = n_timepoints,
+    trans_mat     = trans_mat,
+    starting_state = starting_state,
+    aggregates    = aggs,
+    group         = group,
+    observation_process = cattle_observations,
+    # your own data, reachable as data.rams / data.faecal above
+    rams = Rmask, faecal = Fmask)
+```
+
+:::
+
+Anything the package does not name is yours, and it never looks inside.
+
+## Parameters and priors
+
+::: {.panel-tabset}
+
+### R
+
+```{r}
+#| label: model-r
+mod <- et_model(
+  data = dat,
+  parameters = list(
+    alpha   = et_par(et_gamma(1, 1), init = 0.05),
+    beta    = et_par(et_gamma(1, 1), init = 0.05),
+    m_tilde = et_par(et_gamma(2, 4), init = 4.0),
+    nu      = et_par(et_beta(1, 1),  init = 0.10),
+    theta_r = et_par(et_beta(1, 1),  init = 0.70),
+    theta_f = et_par(et_beta(1, 1),  init = 0.40)),
+  # m = m_tilde + 1 keeps 1/m < 1, so the recovery probability can never leave
+  # (0, 1) and send the sampler into a DomainError.
+  derived = list(m = quote(m_tilde + 1)))
+```
+
+### Julia
+
+```julia
+@model function cattle_model(data, n_time, n_ind, loglik_fn, obs_loglik_fn)
+    α ~ Gamma(1, 1)
+    β ~ Gamma(1, 1)
+    m̃ ~ Gamma(2, 4)
+    m := m̃ + 1.0          # keeps 1/m < 1
+
+    ν  ~ Beta(1, 1)
+    θʳ ~ Beta(1, 1)
+    θᶠ ~ Beta(1, 1)
+
+    # The whole trajectory is ONE latent block: held constant during the
+    # gradients, resampled once per Gibbs sweep by iFFBS.
+    X ~ TrajectoryLatent(n_time, n_ind)
+
+    pars = (; α, β, m, ν, θʳ, θᶠ)
+
+    # BOTH halves. Omitting the observation term is a silent modelling bug:
+    # every test parameter would then be sampled from its prior.
+    @addlogprob! loglik_fn(pars, data, X) + obs_loglik_fn(pars, data, X)
+end
+```
+
+:::
+
+::: {.callout-important}
+## The likelihood has two halves and you need both
+
+`epidemic_loglik` covers the starting state and the transitions.
+`epidemic_obs_loglik` covers the observation process. Neither includes the other.
+
+In Julia you write both terms yourself, and forgetting the second is a real bug
+that has shipped before: the observation process is used only by the filter, so
+every test parameter receives no likelihood information and is effectively
+sampled from its prior. The symptom is subtle — the parameters look
+prior-shaped — and there is no error.
+
+In R the package emits both whenever an observation process is given, and warns
+when one is not.
+:::
+
+## The sampler
+
+::: {.panel-tabset}
+
+### R
+
+```{r}
+#| label: fit-r
+#| eval: false
+fit <- et_sample(mod,
+  blocks = list(
+    et_nuts(c("alpha", "beta", "m_tilde")),
+    # The initial infection frequency and the two test sensitivities have
+    # closed-form conditionals, so they get conjugate kernels rather than NUTS -
+    # an exact independent draw beats a correlated HMC step.
+    et_conjugate_initial_state("nu", at = 1, states = c("S", "I")),
+    et_conjugate_test_sensitivity("theta_r", y = "rams",   infected_state = "I"),
+    et_conjugate_test_sensitivity("theta_f", y = "faecal", infected_state = "I"),
+    et_iffbs("X")),
+  n_sweeps = 2000, n_burn = 800, n_adapts = 400, seed = 7,
+  x_init = X_true)
+
+summary(fit)
+```
+
+### Julia
+
+```julia
+loglik     = epidemic_loglik(data)
+obs_loglik = epidemic_obs_loglik(data)
+latent!    = epidemic_latent_sampler(data)
+
+model = cattle_model(data, n_timepoints, n_individuals, loglik, obs_loglik)
+
+spl = Gibbs(
+    (:α, :β, :m̃) => NUTS(0.8),
+    :ν  => initial_state_kernel(:ν; at = 1, eligible = (X, d, i, t) -> true,
+                                states = (1, 2), prior = [1.0, 1.0]),
+    :θʳ => test_sensitivity_kernel(:θʳ; Y = Rmask, infected_state = 2),
+    :θᶠ => test_sensitivity_kernel(:θᶠ; Y = Fmask, infected_state = 2),
+    :X  => iffbs_kernel(latent!; params = (:α, :β, :m, :ν, :θʳ, :θᶠ)),
+)
+
+# The aggregates must agree with the STARTING trajectory before the first
+# likelihood call. Established once here; the sampler preserves it thereafter.
+X0 = copy(X_true)
+reset_aggregates!(data)
+apply_derived_summaries!((;), data, X0)
+
+chn = AbstractMCMC.sample(StableRNG(7), model, spl, 2000;
+                          init = (; X = X0), n_adapts = 400,
+                          discard_initial = 800,
+                          save_states = (X = :buffer,))
+```
+
+:::
+
+In R, `blocks` is optional: omit it and every parameter goes into one NUTS block
+with the trajectory sampled by iFFBS. It is spelled out here because the three
+conjugate kernels are worth having.
+
+::: {.callout-note collapse="true"}
+## Why the trajectory is one block
+
+The hidden trajectory `X` is stored as a **single whole-matrix latent**, not as a
+family of indexed variables. That is what lets it be held constant during the
+gradient evaluations and resampled once per Gibbs sweep by iFFBS.
+
+It is also the reason this package exists. Written naively inside a model body, a
+latent-state sampler re-runs on *every* gradient call — expensive, and because
+the sampler is stochastic it makes the gradient itself stochastic, which can
+invalidate the inference outright.
+:::
+
+## Results
+
+Both versions recover the simulated truth. From the R run:
+
+```
+          mean     sd   2.5%    50%  97.5%
+alpha   0.0121 0.0032 0.0068 0.0117 0.0197
+beta    0.0190 0.0042 0.0117 0.0188 0.0279
+nu      0.1324 0.0423 0.0619 0.1286 0.2245
+theta_r 0.7328 0.0457 0.6404 0.7348 0.8156
+theta_f 0.4656 0.0428 0.3821 0.4653 0.5498
+m       6.2078 0.8380 4.7773 6.1505 8.0649
+```
+
+| parameter | truth | posterior mean |
+|---|---|---|
+| `alpha` | 0.01 | 0.0121 |
+| `beta` | 0.02 | 0.0190 |
+| `m` | 6 | 6.21 |
+| `nu` | 0.10 | 0.132 |
+| `theta_r` | 0.8 | 0.733 |
+| `theta_f` | 0.5 | 0.466 |
+
+All six within three standard errors, from 2000 sweeps in about 49 seconds — on
+data where the states are never directly observed.
+
+## Seeing the Julia from R
+
+The generated module is a first-class artefact, not a hidden intermediate. It is
+commented, it runs standalone, and it is the on-ramp if you want to move a model
+from R to Julia.
+
+```{r}
+#| label: source
+#| eval: false
+et_julia_source(mod)   # print the module this model generates
+et_source(fit)         # the module behind a fit
+et_eval("...")         # run anything in the session
+```
+
+That is how the two halves of this document relate: the R on the left generates
+something very close to the Julia on the right.
+
+## Where to go next
+
+* **[The badger model](badger.qmd)** — the same ideas at scale: 2384 individuals,
+  four states, six tests, capture-recapture observation, survival, and the
+  performance seams this document deliberately ignores.
+* `et_check_depends()` — verifies the dependency annotations that let each Gibbs
+  block skip likelihood terms it cannot move.
+* `et_residuals()` — post-hoc PIT residuals for the mechanisms in your model,
+  which is how you find out whether any of this fitted well.

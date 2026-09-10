@@ -1,0 +1,41 @@
+# Working notes, not repository content
+# Agent/editor scratch notes kept out of the repository
+CLAUDE.md
+AGENTS.md
+.cursorrules
+*.local.md
+DESIGN.md
+*_DESIGN.md
+HANDOVER*.md
+NOTES.md
+
+# R
+.Rproj.user/
+.Rhistory
+.RData
+.Ruserdata
+*.Rproj
+src/*.o
+src/*.so
+src/*.dll
+..Rcheck/
+*.Rcheck/
+
+# Generated Julia modules and run logs from the examples
+GEN_*.jl
+GEN_*.info
+*.log
+inst/julia/_*.jl
+
+# OS
+.DS_Store
+Thumbs.db
+QUESTIONS.md
+
+# Quarto render artefacts
+docs/*_files/
+docs/.quarto/
+
+# Cached fits and streamed trajectory archives
+docs/cache/
+*.jld2
