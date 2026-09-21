@@ -45,9 +45,17 @@ et_setup <- function(julia_home = NULL, project = NULL, dev = NULL,
   JuliaCall::julia_command("Pkg.instantiate(; io=devnull)")
   for (pkg in c("EpidemicTrajectories", "PracticalBayes", "PracticalEpiBayes",
                 "Distributions", "StableRNGs", "AbstractMCMC", "AdvancedHMC",
-                "ADTypes", "PolyesterForwardDiff")) {
+                "ADTypes")) {
     JuliaCall::julia_command(sprintf("using %s", pkg))
   }
+  # PolyesterForwardDiff is a speed option, not a requirement, so a session
+  # starts without it. Its DifferentiationInterface extension fails to
+  # precompile on some Julia 1.11 resolutions, and loading it unconditionally
+  # made that failure fatal to every fit rather than to the one backend nobody
+  # had asked for. et_adtype("polyester") reports the absence if it is wanted.
+  .et_state$polyester <- isTRUE(tryCatch({
+    JuliaCall::julia_command("using PolyesterForwardDiff"); TRUE
+  }, error = function(e) FALSE))
   .et_state$ready <- TRUE
   if (!is.null(ad_backends)) et_add_ad_backend(ad_backends)
   invisible(TRUE)
