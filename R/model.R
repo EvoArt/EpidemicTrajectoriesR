@@ -1,5 +1,4 @@
-# Layer 3: et_par() / et_model() -- parameters, priors, deterministics, and the
-# two likelihood terms.
+# Parameters, priors, deterministics, and the two likelihood terms.
 
 #' Declare one model parameter.
 #'
@@ -9,7 +8,7 @@
 #'   emitted as `PracticalBayes.filldist(prior, n)`.
 #' @param dim Dimensions of a matrix-valued parameter (`kind = "latent"` only).
 #' @param kind `"sampled"` (the default) for a parameter with a prior, or
-#'   `"latent"` for one **owned by a conjugate kernel** -- emitted as a
+#'   `"latent"` for one **owned by a conjugate kernel**: emitted as a
 #'   placeholder distribution whose density is constant, exactly as the badger
 #'   model's `nu` is.
 #' @return An object of class `et_par`.
@@ -47,12 +46,12 @@ print.et_par <- function(x, ...) {
 #' @param data An [et_data()] object.
 #' @param parameters Named list of [et_par()] declarations.
 #' @param derived Named list of `quote()`d expressions over other parameter
-#'   names -- PracticalBayes deterministics (`:=`). E.g.
+#'   names, PracticalBayes deterministics (`:=`). E.g.
 #'   `list(m = quote(m_tilde + 1))`.
 #' @param entry_time Optional per-individual entry time: a numeric vector, or the
 #'   name of an entry in `data`'s `extras`. Supplying it switches on ET's entry
-#'   gate, which scores disease transitions before entry but NOT the survival
-#'   factor. Requires the transitions to declare an [et_survival()] -- the same
+#'   gate, which scores disease transitions before entry but not the survival
+#'   factor. Requires the transitions to declare an [et_survival()]: the same
 #'   function is passed through automatically, which is the only way the
 #'   subtraction removes exactly what was multiplied in.
 #' @return An object of class `et_model`.
@@ -157,7 +156,7 @@ expr_symbols <- function(e) {
   unique(unlist(lapply(as.list(e)[-1L], expr_symbols)))
 }
 
-# Expand a set of names to the SAMPLED parameters behind them: a derived value
+# Expand a set of names to the sampled parameters behind them: a derived value
 # resolves to the parameters its expression reads, transitively. This is what
 # keeps `depends=` honest when a rate function reads `model$m` and `m` is
 # `m_tilde + 1`.

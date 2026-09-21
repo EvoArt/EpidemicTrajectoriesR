@@ -36,7 +36,7 @@ et_dist(name, args = list())
 \item{a, b}{Beta / Uniform parameters.}
 
 \item{rate}{Exponential rate; emitted as \code{Exponential(1 / rate)} because
-Julia's \code{Exponential} is parameterised by SCALE, which is the single most
+Julia's \code{Exponential} is parameterised by scale, which is the single most
 likely thing for an R user to get backwards.}
 
 \item{alpha}{Dirichlet concentration vector.}

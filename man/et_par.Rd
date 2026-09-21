@@ -17,7 +17,7 @@ emitted as \code{PracticalBayes.filldist(prior, n)}.}
 \item{dim}{Dimensions of a matrix-valued parameter (\code{kind = "latent"} only).}
 
 \item{kind}{\code{"sampled"} (the default) for a parameter with a prior, or
-\code{"latent"} for one \strong{owned by a conjugate kernel} -- emitted as a
+\code{"latent"} for one \strong{owned by a conjugate kernel}: emitted as a
 placeholder distribution whose density is constant, exactly as the badger
 model's \code{nu} is.}
 }

@@ -20,7 +20,7 @@ et_adaptive_hmc(
 
 \item{metric}{\code{"diagonal"} (the default), \code{"dense"} or \code{"unit"}. A dense
 metric learns correlations between parameters, at the cost of estimating
-many more entries during warm-up -- worth it when the posterior is strongly
+many more entries during warm-up, worth it when the posterior is strongly
 correlated and you can afford a long warm-up.}
 }
 \value{
@@ -38,7 +38,7 @@ step size during warm-up exactly as NUTS does, then holds both fixed for
 sampling.
 
 That difference matters more than it sounds. A hand-tuned metric has to be
-right in both ORDER and SCALE, and a scale that is far too small produces a
+right in both order and scale, and a scale that is far too small produces a
 chain that never moves while every acceptance diagnostic still looks healthy.
 Adapting removes that failure mode.
 }

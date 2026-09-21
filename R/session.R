@@ -1,8 +1,6 @@
-# Layer 1 (substrate): the Julia session.
-#
-# One session per R process, set up once and reused. Everything here is
-# idempotent: et_setup() can be called any number of times, and a model can be
-# generated and loaded repeatedly without module-name collisions.
+# One Julia session per R process. Everything here is idempotent: et_setup()
+# can be called repeatedly, and a model can be regenerated and reloaded
+# without module-name collisions.
 
 .et_state <- new.env(parent = emptyenv())
 .et_state$ready <- FALSE
@@ -16,7 +14,7 @@
 #'   environment shipped with this package.
 #' @param dev Named character vector of local checkouts to `Pkg.develop`, e.g.
 #'   `c(EpidemicTrajectories = "~/.julia/dev/EpidemicTrajectories")`. Use this
-#'   when benchmarking or debugging local source changes -- without it the pinned
+#'   when benchmarking or debugging local source changes; without it the pinned
 #'   GitHub versions are used, and a local edit is invisible.
 #' @param ad_backends Extra automatic-differentiation backends to resolve and
 #'   load, e.g. `"mooncake"`. Forward mode works out of the box; the
@@ -74,7 +72,7 @@ et_julia_project <- function() {
 
 #' Evaluate Julia source in the session.
 #'
-#' The escape hatch for anything this package does not wrap -- ET's residuals
+#' The escape hatch for anything this package does not wrap: ET's residuals
 #' layer, `check_iffbs_exact`, a bespoke kernel. A loaded model's module is in
 #' scope by name.
 #'

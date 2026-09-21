@@ -7,7 +7,7 @@
 et_julia(src, reads = NULL)
 }
 \arguments{
-\item{src}{Julia source for the function BODY (not the signature -- the
+\item{src}{Julia source for the function BODY (not the signature, the
 protocol's signature is generated around it).}
 
 \item{reads}{Optional character vector of parameter names the body reads. When

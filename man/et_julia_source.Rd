@@ -19,6 +19,6 @@ An object of class \code{et_source}: \verb{$src} is the Julia text, \verb{$paylo
 the R arrays that must be assigned into Julia before it is loaded.
 }
 \description{
-Works without a Julia session -- useful for inspection, for review, and as the
+Works without a Julia session: useful for inspection, for review, and as the
 on-ramp to writing the model in Julia directly.
 }

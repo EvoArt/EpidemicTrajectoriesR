@@ -1,14 +1,9 @@
-# Layer 3: the `depends=` validator.
+# Validator for the derived `depends=` annotations.
 #
-# PracticalBayes' `depends=` is the largest measured speed-up available in the
-# stack (PERF_REPORT_2026-08-25.md section 1: 1.96x on 89% of badger runtime) and
-# its one hazard is that under-declaring is SILENT -- a real gradient
-# contribution is dropped with no error and no warning.
-#
-# This package derives the annotation from the transpiled bodies rather than
-# asking for it (DESIGN.md section 5), which removes the hand-maintenance failure
-# mode. This file is the belt to that's braces: it moves each parameter and
-# checks that no term it was excluded from actually moves.
+# Under-declaring `depends=` is silent: a real gradient contribution is
+# dropped with no error and no warning. The annotation is derived from the
+# transpiled bodies rather than hand-written, and this is the check on that:
+# move each parameter, confirm no term it was excluded from moves.
 
 #' Check the derived `depends=` annotations against the model's behaviour.
 #'

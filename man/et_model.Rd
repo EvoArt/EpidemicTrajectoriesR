@@ -12,13 +12,13 @@ et_model(data, parameters, derived = list(), entry_time = NULL)
 \item{parameters}{Named list of \code{\link[=et_par]{et_par()}} declarations.}
 
 \item{derived}{Named list of \code{quote()}d expressions over other parameter
-names -- PracticalBayes deterministics (\verb{:=}). E.g.
+names, PracticalBayes deterministics (\verb{:=}). E.g.
 \code{list(m = quote(m_tilde + 1))}.}
 
 \item{entry_time}{Optional per-individual entry time: a numeric vector, or the
 name of an entry in \code{data}'s \code{extras}. Supplying it switches on ET's entry
-gate, which scores disease transitions before entry but NOT the survival
-factor. Requires the transitions to declare an \code{\link[=et_survival]{et_survival()}} -- the same
+gate, which scores disease transitions before entry but not the survival
+factor. Requires the transitions to declare an \code{\link[=et_survival]{et_survival()}}: the same
 function is passed through automatically, which is the only way the
 subtraction removes exactly what was multiplied in.}
 }

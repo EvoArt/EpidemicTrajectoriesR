@@ -26,7 +26,7 @@ et_sample(
 \item{blocks}{List of sampler blocks (\code{\link[=et_nuts]{et_nuts()}}, \code{\link[=et_hmc]{et_hmc()}},
 \code{\link[=et_conjugate]{et_conjugate()}} and friends). Any parameter not named in a block is
 collected into one NUTS block, and the trajectory always gets an iFFBS
-kernel -- so omitting \code{blocks} entirely still gives a valid sampler.}
+kernel, so omitting \code{blocks} entirely still gives a valid sampler.}
 
 \item{n_sweeps}{Kept Gibbs sweeps.}
 
@@ -47,8 +47,8 @@ whatever the block size. It changes only the time taken, never the answer.}
 \item{save_x}{Optional path (e.g. \code{"X.rds"}) to stream the latent trajectory
 to during sampling. Required for \code{\link[=et_residuals]{et_residuals()}}. The trajectory is always
 kept live for conditioning; this only decides where the per-sweep copy goes,
-and by default it is dropped rather than carried in the chain -- it is
-\verb{n_timepoints x n_individuals} integers EVERY sweep.
+and by default it is dropped rather than carried in the chain: it is
+\verb{n_timepoints x n_individuals} integers every sweep.
 
 The archive is written as \code{.rds}, which R reads natively. Sampling streams
 through Julia's own format and \code{\link[=et_convert_trajectories]{et_convert_trajectories()}} rewrites it once

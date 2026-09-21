@@ -15,7 +15,7 @@ et_eval(src, need_return = TRUE)
 The Julia value, converted by JuliaCall, or invisibly \code{NULL}.
 }
 \description{
-The escape hatch for anything this package does not wrap -- ET's residuals
+The escape hatch for anything this package does not wrap: ET's residuals
 layer, \code{check_iffbs_exact}, a bespoke kernel. A loaded model's module is in
 scope by name.
 }

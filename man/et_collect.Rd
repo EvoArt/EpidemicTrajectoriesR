@@ -47,12 +47,12 @@ so nothing about the trajectory is retained.
 }
 \details{
 Use this when the archive would be too large to keep: the trajectory is
-\verb{n_timepoints x n_individuals} integers EVERY sweep, and \code{save_every} is a
+\verb{n_timepoints x n_individuals} integers every sweep, and \code{save_every} is a
 flush interval rather than thinning, so a long run over a large population
 archives everything. Storage here is \verb{n_individuals x n_keep} doubles per
-residual instead -- on the badger model ~9.5 MB per residual against ~15 GB
+residual instead: on the badger model ~9.5 MB per residual against ~15 GB
 of trajectories.
 
-The trade is that the residuals must be decided BEFORE the fit. Archiving
+The trade is that the residuals must be decided before the fit. Archiving
 lets you add new ones later without refitting; this does not.
 }

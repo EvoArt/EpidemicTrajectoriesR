@@ -14,22 +14,22 @@ with the Julia stack (\code{EpidemicTrajectories.jl}, \code{PracticalBayes.jl},
 \section{The shape of a model}{
 
 \enumerate{
-\item \code{\link[=et_aggregate]{et_aggregate()}} -- the arrays tracked during the latent update, with
+\item \code{\link[=et_aggregate]{et_aggregate()}}: the arrays tracked during the latent update, with
 their reversible updates. The package attaches no meaning to them.
-\item \code{\link[=et_transitions]{et_transitions()}} -- the states, the transitions between them, and the
+\item \code{\link[=et_transitions]{et_transitions()}}: the states, the transitions between them, and the
 rate function for each. Optionally an \code{\link[=et_survival]{et_survival()}} making every step
 conditional on survival.
-\item \code{\link[=et_data]{et_data()}} -- problem size, group structure, the observation process,
+\item \code{\link[=et_data]{et_data()}}: problem size, group structure, the observation process,
 and your own arrays.
-\item \code{\link[=et_model]{et_model()}} -- parameters, priors, and deterministic
+\item \code{\link[=et_model]{et_model()}}: parameters, priors, and deterministic
 reparameterisations.
-\item \code{\link[=et_sample]{et_sample()}} -- Gibbs blocks and the run.
+\item \code{\link[=et_sample]{et_sample()}}: Gibbs blocks and the run.
 }
 }
 
 \section{Two things worth knowing up front}{
 
-The likelihood has \strong{two halves} -- the transitions and the observations --
+The likelihood has \strong{two halves}: the transitions and the observations --
 and both are needed. This package always emits both when an observation
 process is given, and warns when one is not, because omitting the observation
 term is a silent modelling bug: every observation parameter would then be

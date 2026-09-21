@@ -17,7 +17,7 @@ et_reproduction_numbers(
 \arguments{
 \item{fit}{An \code{\link[=et_fit]{et_fit()}} from \code{\link[=et_sample]{et_sample()}} run with \verb{save_x =}.}
 
-\item{components}{Named list of rate functions -- the force-of-infection
+\item{components}{Named list of rate functions, the force-of-infection
 decomposition. Each is written in the same R subset as any other rate
 function, taking \verb{(model, data, i, t)}.}
 
@@ -52,14 +52,14 @@ than joining \code{\link[=et_residuals]{et_residuals()}}.
 The package cannot split a force of infection by itself: \code{S -> E} is one rate
 function returning one number, and nothing in it says which part is background
 and which is transmission. So you declare the parts, exactly as you declare
-rates and aggregates -- as ordinary R rate functions of \verb{(model, data, i, t)}
+rates and aggregates, as ordinary R rate functions of \verb{(model, data, i, t)}
 -- and say which one is transmission via \code{secondary}. The package sums them,
 normalises, and never needs to know what any of them means.
 
 For each infection event, the transmission component of the victim's force of
 infection is shared among the infectives in its group in proportion to
 \code{weight}. Background infections are attributed to nobody, which is the point
-of the split. An individual that was never infectious gets \code{NA} -- it had no
+of the split. An individual that was never infectious gets \code{NA}: it had no
 opportunity to infect anyone, which differs from having had the opportunity
 and infected nobody (a genuine \code{0}).
 }

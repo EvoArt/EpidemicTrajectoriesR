@@ -1,15 +1,8 @@
-# Layer 3: residuals -- the diagnostic half.
+# PIT residuals: uniform on (0, 1) when the mechanism each one targets is
+# right, so departure from uniformity points at that mechanism specifically.
 #
-# A fit tells you what the parameters are; a residual tells you whether the model
-# that produced them is any good. Each of these is a PIT residual: uniform on
-# (0, 1) if the mechanism it targets is right, so a departure from uniformity is
-# evidence of misfit in THAT mechanism rather than a diffuse "the model is bad".
-#
-# The trajectories they score come from the fit. Two routes, and the R surface
-# takes the post-hoc one: sample with `save_x =`, which streams the trajectory to
-# disc, then compute residuals from the archive afterwards. That decouples the
-# diagnostics from the fit -- new residuals can be added without refitting -- and
-# keeps `et_sample()` a single call.
+# Computed post-hoc from the archive rather than during the fit, so new
+# residuals can be added without refitting.
 
 #' Residual for how long an individual survives.
 #'
@@ -23,7 +16,7 @@
 #'
 #' @param origin Clock origin per individual: the name of an `extras` vector, or
 #'   a function of the individual index. Typically birth.
-#' @param condition_on A time the individual is KNOWN to have been alive --
+#' @param condition_on A time the individual is known to have been alive --
 #'   typically first capture. The CDF is renormalised by survival to here.
 #' @param censor_at When observation ends for an individual that does not die
 #'   within the trajectory. Typically last capture.
@@ -52,14 +45,14 @@ et_residual_survival <- function(origin, condition_on, censor_at,
 #'
 #' @param from,to State names.
 #' @param origin Where the clock starts:
-#'   * `"entry_to_from_state"` -- when the individual entered `from`, read from
+#'   * `"entry_to_from_state"`, when the individual entered `from`, read from
 #'     the trajectory. Right for a latent period: the clock starts at exposure.
-#'   * `"window_start"` -- when observation started. Right for an exposure time:
+#'   * `"window_start"`: when observation started. Right for an exposure time:
 #'     a susceptible individual was already susceptible when watching began, so
 #'     its clock cannot start at entry to `S`.
 #' @param censor_at Character vector naming what ends observation.
 #'   `"window_end"` is the individual's own sampling window; any other entry is
-#'   read as a STATE, censoring at the last step before it was entered. The
+#'   read as a state, censoring at the last step before it was entered. The
 #'   earliest applicable one wins.
 #'
 #'   A competing risk belongs here rather than being dropped: an individual that
@@ -120,7 +113,7 @@ residual_to_julia <- function(r, states) {
 # window (a badger born before monitoring began), while the arrays the survival
 # function indexes only exist over `1:n_timepoints`. The age is still right --
 # `age[i, t]` is `t - birth[i]`, so an individual born earlier is simply older at
-# t = 1 -- but the product has to start inside the array.
+# t = 1, but the product has to start inside the array.
 index_fn_src <- function(x) {
   if (is.character(x) && length(x) == 1L) {
     return(sprintf("i -> max(%s[i], 1)", x))
@@ -135,7 +128,7 @@ index_fn_src <- function(x) {
 }
 
 # The survival function the residual scores against. Defaults to the one the
-# transitions declared -- they MUST agree, or the residual scores a different
+# transitions declared: they must agree, or the residual scores a different
 # model than the one that was fitted.
 survival_src <- function(x) {
   if (is.null(x)) return("et_survival_fn")
@@ -154,8 +147,8 @@ survival_src <- function(x) {
 #' @param fit An [et_fit()] from [et_sample()] run with `save_x =`.
 #' @param residuals List of [et_residual_survival()] / [et_residual_waiting()].
 #' @param sync_aggregates Rebuild the tracked arrays for each draw before scoring
-#'   it. Needed when any rate reads `data$aggregates` -- a spec-derived hazard
-#'   then depends on them agreeing with THIS draw's trajectory, not with whatever
+#'   it. Needed when any rate reads `data$aggregates`: a spec-derived hazard
+#'   then depends on them agreeing with this draw's trajectory, not with whatever
 #'   was current when the fit ended. Costs one pass per draw, which is why it is
 #'   not unconditional.
 #' @param seed RNG seed for the randomised PIT. Its own stream, so it never
@@ -191,7 +184,7 @@ et_residuals <- function(fit, residuals, sync_aggregates = TRUE, seed = 1) {
   names_v <- vapply(residuals, function(r) r$name, character(1))
 
   # Each archived trajectory must be scored under the parameters that produced
-  # it, so the draws go across as ONE flat numeric matrix (draws x scalars) and
+  # it, so the draws go across as one flat numeric matrix (draws x scalars) and
   # the generated module rebuilds the NamedTuples from it. A matrix marshals
   # unambiguously; a list of NamedTuples does not.
   flat <- flatten_draws(fit)
@@ -201,7 +194,7 @@ et_residuals <- function(fit, residuals, sync_aggregates = TRUE, seed = 1) {
   # Parsed AND evaluated inside the generated module: the residual constructors,
   # the survival function and the `extras` vectors all live there, so building
   # the spec anywhere else would mean qualifying every one of them.
-  # `include_string` is what puts both halves in the module's scope -- `Base.eval`
+  # `include_string` is what puts both halves in the module's scope; `Base.eval`
   # with a `quote` would still resolve the names where the quote was written.
   # The per-flush chunks, in sweep order. Discovery happens HERE because R is
   # the side that knows which format the archive is in; Julia is handed an
@@ -220,9 +213,9 @@ et_residuals <- function(fit, residuals, sync_aggregates = TRUE, seed = 1) {
 
   if (from_rds) {
     # An `.rds` chunk is an R object, so Julia cannot open it. Rather than
-    # SCORE it separately -- a second scoring path that must be kept in step
-    # with the first, and silently was not -- the chunks are staged back to
-    # temporary `.jld2` and fed to the SAME lazy reader. One scoring
+    # score it separately -- a second scoring path that must be kept in step
+    # with the first, and silently was not: the chunks are staged back to
+    # temporary `.jld2` and fed to the same lazy reader. One scoring
     # implementation, so the two formats cannot disagree by construction.
     #
     # Staging is one chunk at a time and the copies are deleted together
@@ -238,8 +231,8 @@ et_residuals <- function(fit, residuals, sync_aggregates = TRUE, seed = 1) {
     "et_residuals(Main.%s; specs=(\n    %s,\n  ), names=%s, par_draws=_et_unflatten(Main.%s), sync=%s, seed=%s)",
     files_sym, specs, julia_symbol_vector(names_v), sym,
     if (isTRUE(sync_aggregates)) "true" else "false", julia_int(seed))
-  # The source goes across as a VALUE, not embedded in another Julia string
-  # literal -- nesting one inside the other double-escapes every quote in it.
+  # The source goes across as a value, not embedded in another Julia string
+  # literal: nesting one inside the other double-escapes every quote in it.
   src_sym <- paste0(fit$module, "_resid_src")
   JuliaCall::julia_assign(src_sym, body)
   raw <- JuliaCall::julia_eval(sprintf("Base.include_string(%s, Main.%s)",
@@ -263,7 +256,7 @@ et_residuals <- function(fit, residuals, sync_aggregates = TRUE, seed = 1) {
 # back using the same order and the declared shapes, so the two cannot disagree
 # about which column is which.
 #
-# Only SAMPLED parameters: deterministics are recomputed from them, so carrying
+# Only sampled parameters: deterministics are recomputed from them, so carrying
 # them would be redundant and could disagree.
 flatten_draws <- function(fit) {
   model <- fit$model
@@ -307,10 +300,10 @@ et_residual_summary <- function(x) {
   }))
 }
 
-# Stage `.rds` chunks back to temporary `.jld2`, so the ONE lazy Julia reader
+# Stage `.rds` chunks back to temporary `.jld2`, so the one lazy Julia reader
 # can score them.
 #
-# The alternative -- a second, R-side scoring loop -- was tried and dropped: it
+# The alternative, a second R-side scoring loop, was tried and dropped: it
 # silently disagreed with the Julia path (93/240 residual values differed, while
 # `sync=FALSE` agreed exactly), because keeping two scoring implementations in
 # step is precisely the thing that does not stay true. Staging costs one file

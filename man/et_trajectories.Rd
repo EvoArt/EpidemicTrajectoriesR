@@ -22,8 +22,8 @@ Reads the trajectories \code{\link[=et_sample]{et_sample()}} archived, as a list
 }
 \details{
 Selecting \code{draws} reads only the chunks that contain them, so inspecting a
-handful out of thousands does not read the whole archive. Reading them ALL is
-what the archive exists to avoid -- \code{\link[=et_residuals]{et_residuals()}} scores them one chunk at
-a time without ever materialising the run -- so pass \code{draws} unless the
+handful out of thousands does not read the whole archive. Reading them all is
+what the archive exists to avoid: \code{\link[=et_residuals]{et_residuals()}} scores them one chunk at
+a time without ever materialising the run, so pass \code{draws} unless the
 archive is small.
 }

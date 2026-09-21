@@ -1,12 +1,10 @@
-# Layer 3: running the sampler, and the cheap checks that do not need one.
-
 #' Fit the model.
 #'
 #' @param model An [et_model()].
 #' @param blocks List of sampler blocks ([et_nuts()], [et_hmc()],
 #'   [et_conjugate()] and friends). Any parameter not named in a block is
 #'   collected into one NUTS block, and the trajectory always gets an iFFBS
-#'   kernel -- so omitting `blocks` entirely still gives a valid sampler.
+#'   kernel, so omitting `blocks` entirely still gives a valid sampler.
 #' @param n_sweeps Kept Gibbs sweeps.
 #' @param n_burn Sweeps discarded before collection.
 #' @param n_adapts Adaptation steps passed to every HMC/NUTS block.
@@ -21,8 +19,8 @@
 #' @param save_x Optional path (e.g. `"X.rds"`) to stream the latent trajectory
 #'   to during sampling. Required for [et_residuals()]. The trajectory is always
 #'   kept live for conditioning; this only decides where the per-sweep copy goes,
-#'   and by default it is dropped rather than carried in the chain -- it is
-#'   `n_timepoints x n_individuals` integers EVERY sweep.
+#'   and by default it is dropped rather than carried in the chain: it is
+#'   `n_timepoints x n_individuals` integers every sweep.
 #'
 #'   The archive is written as `.rds`, which R reads natively. Sampling streams
 #'   through Julia's own format and [et_convert_trajectories()] rewrites it once
@@ -58,10 +56,10 @@ et_sample <- function(model, blocks = list(), n_sweeps = 1000, n_burn = 0,
     message(sprintf("Running %d sweeps (burn %d, adapt %d) ...",
                     n_sweeps, n_burn, n_adapts))
   }
-  # The archive is addressed by TEMPLATE, and the two formats differ only in the
+  # The archive is addressed by template, and the two formats differ only in the
   # extension. Sampling always streams through Julia's own backend; asking for
-  # `.rds` means "convert it afterwards", not "have Julia write R files" -- no
-  # Julia package can write `.rds`, and conversion is per FLUSH, so it costs
+  # `.rds` means "convert it afterwards", not "have Julia write R files": no
+  # Julia package can write `.rds`, and conversion is per flush, so it costs
   # nothing against the sweeps it follows.
   want_rds <- FALSE
   if (!is.null(save_x)) {
@@ -88,7 +86,7 @@ et_sample <- function(model, blocks = list(), n_sweeps = 1000, n_burn = 0,
     message(sprintf("done in %.1f s (%.3f s/sweep)", elapsed,
                     elapsed / max(1, n_sweeps + n_burn)))
   }
-  # Convert AFTER sampling, so a crash during the fit still leaves every
+  # Convert after sampling, so a crash during the fit still leaves every
   # already-flushed chunk on disc for et_convert_trajectories() to recover.
   if (want_rds && isTRUE(convert_x)) {
     et_convert_trajectories(save_x, quiet = quiet)
@@ -123,10 +121,10 @@ check_x_init <- function(x_init, model) {
 # matrix otherwise; restore the declared shape so `fit$draws$nu` is an array of
 # the right dimensions rather than a flat block.
 #
-# Only SAMPLED parameters come back from the chain: PracticalBayes' `:=`
+# Only sampled parameters come back from the chain: PracticalBayes' `:=`
 # deterministics are not stored under their own key, so the derived values are
-# recomputed here from the draws. That is exact -- a deterministic is a function
-# of the sampled values and nothing else -- and it keeps `fit$draws$m` available
+# recomputed here from the draws. That is exact: a deterministic is a function
+# of the sampled values and nothing else, and it keeps `fit$draws$m` available
 # without asking the sampler to carry a redundant column.
 restore_shapes <- function(raw, model) {
   out <- list()
@@ -164,7 +162,7 @@ restore_shapes <- function(raw, model) {
 #' @param model An [et_model()].
 #' @param blocks The same sampler blocks you will pass to [et_sample()]. They do
 #'   not affect the log density, but passing them makes this call generate the
-#'   SAME Julia module the fit will use, so nothing is compiled twice -- and a
+#'   same Julia module the fit will use, so nothing is compiled twice, and a
 #'   model with a conjugate-owned parameter needs its kernel declared to build at
 #'   all.
 #' @param x_init Optional starting trajectory.

@@ -1,8 +1,9 @@
-# Working notes, not repository content
-# Agent/editor scratch notes kept out of the repository
+# Working notes and agent/editor scratch, not repository content
 CLAUDE.md
 AGENTS.md
 .cursorrules
+.aider*
+.claude/
 *.local.md
 DESIGN.md
 *_DESIGN.md

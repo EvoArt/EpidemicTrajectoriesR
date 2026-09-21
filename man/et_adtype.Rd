@@ -42,6 +42,6 @@ Backends other than the two forward ones are not installed by default; add
 them with \code{et_setup(ad_backends = "mooncake")}, which resolves them into this
 package's pinned Julia project.
 
-No backend changes the answer -- only the time taken. If two backends disagree
+No backend changes the answer, only the time taken. If two backends disagree
 on a log density or a gradient, that is a bug, not a tuning question.
 }

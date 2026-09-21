@@ -12,8 +12,8 @@ et_residuals(fit, residuals, sync_aggregates = TRUE, seed = 1)
 \item{residuals}{List of \code{\link[=et_residual_survival]{et_residual_survival()}} / \code{\link[=et_residual_waiting]{et_residual_waiting()}}.}
 
 \item{sync_aggregates}{Rebuild the tracked arrays for each draw before scoring
-it. Needed when any rate reads \code{data$aggregates} -- a spec-derived hazard
-then depends on them agreeing with THIS draw's trajectory, not with whatever
+it. Needed when any rate reads \code{data$aggregates}: a spec-derived hazard
+then depends on them agreeing with this draw's trajectory, not with whatever
 was current when the fit ended. Costs one pass per draw, which is why it is
 not unconditional.}
 

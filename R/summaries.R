@@ -1,19 +1,11 @@
-# Layer 2: hand-written reversible summaries -- ET's verbose fallback.
+# Hand-written reversible summaries, for updates et_aggregate() cannot derive
+# ones whose contribution depends on something the `A[i] <- A[i] + x` shape
+# does not expose, such as the badger coupling counts, which depend on where
+# the individual goes at t+1.
 #
-# `et_aggregate()` derives the reverse update from a `A[i] <- A[i] + x` shape,
-# which covers most tracked arrays. It cannot cover an update whose contribution
-# depends on something the shape does not expose -- the badger coupling's nSE/nSS
-# counts, for instance, depend on where the individual goes NEXT (`X[t+1, i]`).
-#
-# For those, ET takes plain functions `(model, data, X, s, i, t, reverse)` that
-# honour `reverse` themselves. `et_summary()` is that path from R: you write the
-# whole update, including the reverse, and the package checks only that both
-# directions are present.
-#
-# The invariant is unchanged and is the whole basis of iFFBS's correctness: after
-# a forward update and its reverse, the aggregates must be exactly as they were.
-# Nothing can check that for you here, which is why `et_aggregate()` is the
-# default and this is the fallback.
+# Forward update then reverse must leave the aggregates exactly as they were.
+# That invariant is what makes iFFBS correct, and nothing here can check it
+# for you.
 
 #' Declare a tracked array with a hand-written reversible update.
 #'
@@ -73,7 +65,7 @@ print.et_summary <- function(x, ...) {
 #' update body, exactly as [et_aggregate()] does) alongside [et_summary()]
 #' entries (whose reverse you write yourself). Use it when a model needs both.
 #'
-#' When every array is an [et_array()], prefer [et_aggregate()] -- it is the same
+#' When every array is an [et_array()], prefer [et_aggregate()]: it is the same
 #' thing with less ceremony.
 #'
 #' @param states Character vector of state names, in encoding order.
@@ -112,7 +104,7 @@ et_aggregates <- function(states, arrays, update = NULL) {
     check_protocol_formals(update, c("model", "data", "X", "state", "i", "t"),
                            "aggregate update", "update")
     ctx <- new_ctx(state_syms = TRUE, states = states)
-    # Parsed twice, deliberately: `parse_aggregate_body` VALIDATES (it is the
+    # Parsed twice, deliberately: `parse_aggregate_body` validates (it is the
     # thing that refuses a non-reversible shape) and renders the `@aggregate`
     # lines; `aggregate_records` returns the same updates in pieces, so the
     # fallback path can emit them as standalone functions.
@@ -133,9 +125,9 @@ et_aggregates <- function(states, arrays, update = NULL) {
 
 # Transpile one hand-written summary into the Julia function ET calls.
 #
-# ET passes `reverse` POSITIONALLY with a default, and a keyword on a call the
+# ET passes `reverse` positionally with a default, and a keyword on a call the
 # compiler cannot resolve forces the kwarg path and allocates a NamedTuple per
-# call -- which, in a function invoked per individual per timepoint, is a real
+# call, which, in a function invoked per individual per timepoint, is a real
 # cost. So the emitted signature takes it positionally.
 et_transpile_summary <- function(name, spec, states, helpers = list(),
                                  array_names = character()) {
