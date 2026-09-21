@@ -185,6 +185,84 @@ et_loglik <- function(model, blocks = list(), x_init = NULL) {
   unlist(res)
 }
 
+#' Simulate a trajectory from the model.
+#'
+#' Draws a state trajectory forward in time using the transitions the model
+#' declares, so simulated data and fitted model cannot disagree about the
+#' dynamics. Writing the simulator by hand instead means maintaining a second
+#' copy of the same rates, and nothing checks that the two still match.
+#'
+#' Note this simulates the LATENT STATES only. Turning states into observations
+#' is the user's own step, because only they know what was observed and how --
+#' see the example below.
+#'
+#' @param model An [et_model()].
+#' @param pars Named list of parameter values to simulate at. Defaults to each
+#'   parameter's `init`. Derived values are recomputed, not supplied.
+#' @param seed RNG seed.
+#' @param blocks Sampler blocks, as for [et_loglik()]. They do not affect the
+#'   simulation, but passing the same ones reuses the compiled module.
+#' @return An `n_timepoints x n_individuals` integer matrix of 1-based state
+#'   codes.
+#' @export
+#' @examples
+#' \dontrun{
+#' X <- et_simulate(model, pars = list(alpha = 0.005, beta = 0.03))
+#'
+#' # Observe it: caught with probability p while alive, then tested.
+#' caught <- (X != 3L) & matrix(runif(length(X)) < 0.6, nrow(X), ncol(X))
+#' }
+et_simulate <- function(model, pars = NULL, seed = 1, blocks = list()) {
+  et_require_session()
+  if (!inherits(model, "et_model")) {
+    stop("et_simulate(): `model` must come from et_model().", call. = FALSE)
+  }
+  gen <- et_julia_source(model, blocks)
+  mod <- et_load_module(gen)
+
+  vals <- lapply(model$par_names, function(nm) model$parameters[[nm]]$init)
+  names(vals) <- model$par_names
+  if (!is.null(pars)) {
+    unknown <- setdiff(names(pars), model$par_names)
+    if (length(unknown)) {
+      stop("et_simulate(): unknown parameter(s): ",
+           paste(unknown, collapse = ", "), ". The model declares: ",
+           paste(model$par_names, collapse = ", "), ".", call. = FALSE)
+    }
+    for (nm in names(pars)) {
+      if (length(pars[[nm]]) != length(vals[[nm]])) {
+        stop("et_simulate(): '", nm, "' has length ", length(pars[[nm]]),
+             " but the model declares ", length(vals[[nm]]), ".", call. = FALSE)
+      }
+      vals[[nm]] <- as.numeric(pars[[nm]])
+    }
+  }
+
+  et_simulate_inject(mod)
+  nt <- paste(sprintf("%s=%s", names(vals),
+                      vapply(vals, function(v)
+                        if (length(v) > 1) julia_vector(v, "Float64")
+                        else julia_float(v), character(1))),
+              collapse = ", ")
+  out <- JuliaCall::julia_eval(sprintf(
+    "%s.et_simulate_at((; %s); seed=%s)", mod, nt, julia_int(seed)))
+  matrix(as.integer(out), nrow = model$data$n_timepoints)
+}
+
+# The simulator entry point, injected once per module. Not part of
+# et_julia_source(), whose text is hashed to fix the module name.
+et_simulate_inject <- function(mod) {
+  src <- paste0(
+    "if !isdefined(@__MODULE__, :et_simulate_at)\n",
+    "function et_simulate_at(v; seed=1)\n",
+    "    epidemic_simulator(DATA)(StableRNG(seed), et_params(v))\n",
+    "end\n",
+    "end\n")
+  nm <- paste0(mod, "_sim_src")
+  JuliaCall::julia_assign(nm, src)
+  JuliaCall::julia_command(sprintf("Base.include_string(%s, Main.%s)", mod, nm))
+}
+
 #' Run one iFFBS latent sweep in isolation.
 #'
 #' The latent sampler on its own, at the model's initial parameters. Useful for
