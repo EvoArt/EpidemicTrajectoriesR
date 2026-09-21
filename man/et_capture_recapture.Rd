@@ -8,10 +8,8 @@ et_capture_recapture(
   caught,
   p,
   unobservable_states = "absorbing",
-  test = NULL,
-  infected_states = NULL,
-  sensitivity = NULL,
-  specificity = NULL
+  tests = NULL,
+  infected_states = NULL
 )
 }
 \arguments{
@@ -34,15 +32,15 @@ absorbing state (see \code{constrain_survival} in \code{\link[=et_lfo_spec]{et_l
 argument may name any number of states: a trajectory can be contradicted
 by a state the proposal has no way to avoid.}
 
-\item{test}{Optional name of an \code{extras} entry holding the test result for a
-caught individual (\code{1} positive, \code{0} negative, anything else "not tested").
-Only read where \code{caught} is 1.}
+\item{tests}{Optional diagnostic tests applied to a caught individual, as a
+list of \code{\link[=et_test]{et_test()}}. A bare \code{\link[=et_test]{et_test()}} is accepted for the single-test
+case. Results are read only where \code{caught} is 1.
+
+More than one test is usual rather than exotic: with a single test,
+sensitivity, specificity and prevalence all compete to explain the same
+positives, and none of them is identified without fixing one.}
 
 \item{infected_states}{Integer codes of the states a test can detect.}
-
-\item{sensitivity, specificity}{Names of the model parameters for the test's
-sensitivity and specificity. \code{specificity} may be left \code{NULL} for a test
-with no false positives.}
 }
 \value{
 An object of class \code{et_capture_recapture}, accepted by

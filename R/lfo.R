@@ -90,19 +90,19 @@ truncation_src <- function(plan) {
 #'   absorbing state (see `constrain_survival` in [et_lfo_spec()]), while this
 #'   argument may name any number of states: a trajectory can be contradicted
 #'   by a state the proposal has no way to avoid.
-#' @param test Optional name of an `extras` entry holding the test result for a
-#'   caught individual (`1` positive, `0` negative, anything else "not tested").
-#'   Only read where `caught` is 1.
+#' @param tests Optional diagnostic tests applied to a caught individual, as a
+#'   list of [et_test()]. A bare [et_test()] is accepted for the single-test
+#'   case. Results are read only where `caught` is 1.
+#'
+#'   More than one test is usual rather than exotic: with a single test,
+#'   sensitivity, specificity and prevalence all compete to explain the same
+#'   positives, and none of them is identified without fixing one.
 #' @param infected_states Integer codes of the states a test can detect.
-#' @param sensitivity,specificity Names of the model parameters for the test's
-#'   sensitivity and specificity. `specificity` may be left `NULL` for a test
-#'   with no false positives.
 #' @return An object of class `et_capture_recapture`, accepted by
 #'   [et_lfo_spec()] as `cell_logdensity`.
 #' @export
 et_capture_recapture <- function(caught, p, unobservable_states = "absorbing",
-                                 test = NULL, infected_states = NULL,
-                                 sensitivity = NULL, specificity = NULL) {
+                                 tests = NULL, infected_states = NULL) {
   stopifnot(is.character(caught), length(caught) == 1L)
   stopifnot(is.character(p), length(p) == 1L)
   check_julia_name(c(caught, p), "name")
@@ -114,31 +114,64 @@ et_capture_recapture <- function(caught, p, unobservable_states = "absorbing",
            "\"absorbing\", or NULL.", call. = FALSE)
     }
   }
-  if (!is.null(test)) {
-    if (is.null(infected_states) || is.null(sensitivity)) {
-      stop("et_capture_recapture(): `test` needs `infected_states` and ",
-           "`sensitivity` -- otherwise a result cannot be scored.", call. = FALSE)
+  if (inherits(tests, "et_test")) tests <- list(tests)
+  if (!is.null(tests)) {
+    if (!is.list(tests) || !length(tests) ||
+        !all(vapply(tests, inherits, logical(1), "et_test"))) {
+      stop("et_capture_recapture(): `tests` must be an et_test(), or a list ",
+           "of them.", call. = FALSE)
     }
-    check_julia_name(c(test, sensitivity, specificity), "name")
+    if (is.null(infected_states)) {
+      stop("et_capture_recapture(): scoring a test needs `infected_states` -- ",
+           "which states it is meant to detect.", call. = FALSE)
+    }
   }
   structure(list(caught = caught, p = p,
                  unobservable = unobservable_states,
-                 test = test, sensitivity = sensitivity, specificity = specificity,
+                 tests = tests,
                  infected_states = if (is.null(infected_states)) NULL
                                    else as.integer(infected_states)),
             class = "et_capture_recapture")
+}
+
+#' One diagnostic test applied to caught individuals.
+#'
+#' @param result Name of an `extras` entry holding the result matrix, indexed
+#'   `[t, i]`: `1` positive, `0` negative, anything else "not tested".
+#' @param sensitivity Name of the model parameter for P(positive | infected).
+#' @param specificity Name of the model parameter for P(negative | uninfected).
+#'   `NULL` for a test that never gives a false positive, in which case a
+#'   positive result rules the uninfected states out entirely.
+#' @return An object of class `et_test`.
+#' @export
+et_test <- function(result, sensitivity, specificity = NULL) {
+  stopifnot(is.character(result), length(result) == 1L)
+  stopifnot(is.character(sensitivity), length(sensitivity) == 1L)
+  check_julia_name(c(result, sensitivity, specificity), "name")
+  structure(list(result = result, sensitivity = sensitivity,
+                 specificity = specificity), class = "et_test")
+}
+
+#' @export
+print.et_test <- function(x, ...) {
+  cat("<et_test> ", x$result, "  se=", x$sensitivity,
+      if (is.null(x$specificity)) "  sp=1 (no false positives)"
+      else paste0("  sp=", x$specificity), "\n", sep = "")
+  invisible(x)
 }
 
 #' @export
 print.et_capture_recapture <- function(x, ...) {
   cat("<et_capture_recapture> ", x$caught, " ~ Bernoulli(", x$p,
       ") when alive", sep = "")
-  if (is.null(x$test)) {
-    cat("\n  no test: the observation says ALIVE vs DEAD only, so it carries",
+  if (is.null(x$tests)) {
+    cat("\n  no test: the observation says alive vs dead only, so it carries",
         "\n  no information about infection -- see ?et_capture_recapture\n")
   } else {
-    cat("\n  + ", x$test, " on states {",
-        paste(x$infected_states, collapse = ","), "}\n", sep = "")
+    cat("\n  + ", length(x$tests), " test(s) on states {",
+        paste(x$infected_states, collapse = ","), "}: ",
+        paste(vapply(x$tests, function(tt) tt$result, character(1)),
+              collapse = ", "), "\n", sep = "")
   }
   invisible(x)
 }
@@ -154,7 +187,9 @@ print.et_capture_recapture <- function(x, ...) {
 cr_cell_logdensity <- function(cr) {
   body <- paste0(
     sprintf("lp = y == 1 ? log(model.%s) : log1p(-model.%s)\n", cr$p, cr$p),
-    if (!is.null(cr$test)) cr_test_src(cr) else "",
+    paste(vapply(cr$tests %||% list(), cr_test_src, character(1),
+                 infected = cr$infected_states),
+          collapse = ""),
     "lp")
   head <- sprintf("y = data.%s[t, i]\n", cr$caught)
   if (is.null(cr$unobservable)) return(et_julia(paste0(head, body)))
@@ -188,13 +223,12 @@ cr_unobservable_src <- function(cr) {
 # the test cannot detect contributes the false-positive term, so a positive on
 # an uninfected individual is improbable rather than impossible, returning
 # -Inf there would discard the draw over a test error.
-cr_test_src <- function(cr) {
-  inf_set <- sprintf("(%s)", paste(c(julia_int(cr$infected_states), ""),
-                                   collapse = ", "))
-  spec_pos <- if (is.null(cr$specificity)) "-Inf"
-              else sprintf("log1p(-model.%s)", cr$specificity)
-  spec_neg <- if (is.null(cr$specificity)) "0.0"
-              else sprintf("log(model.%s)", cr$specificity)
+cr_test_src <- function(test, infected) {
+  inf_set <- sprintf("(%s)", paste(c(julia_int(infected), ""), collapse = ", "))
+  spec_pos <- if (is.null(test$specificity)) "-Inf"
+              else sprintf("log1p(-model.%s)", test$specificity)
+  spec_neg <- if (is.null(test$specificity)) "0.0"
+              else sprintf("log(model.%s)", test$specificity)
   sprintf(paste0(
     "if y == 1\n",
     "    r = data.%s[t, i]\n",
@@ -206,7 +240,8 @@ cr_test_src <- function(cr) {
     "        end\n",
     "    end\n",
     "end\n"),
-    cr$test, inf_set, cr$sensitivity, cr$sensitivity, spec_pos, spec_neg)
+    test$result, inf_set, test$sensitivity, test$sensitivity,
+    spec_pos, spec_neg)
 }
 
 # Known present: individual `i` is caught somewhere in [t, window end], so it

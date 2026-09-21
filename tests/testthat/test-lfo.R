@@ -30,9 +30,11 @@ julia_parses <- function(src) {
 }
 
 cr <- et_capture_recapture(caught = "caught", p = "p")
-crt <- et_capture_recapture(caught = "caught", p = "p",
-                            test = "tested", infected_states = 2L,
-                            sensitivity = "se", specificity = "sp")
+crt <- et_capture_recapture(caught = "caught", p = "p", infected_states = 2L,
+                            tests = et_test("tested", "se", "sp"))
+cr2 <- et_capture_recapture(caught = "caught", p = "p", infected_states = 2L,
+                            tests = list(et_test("t1", "se1", "sp1"),
+                                         et_test("t2", "se2", "sp2")))
 plan <- et_lfo_truncation(clamp = "last_seen", keep = "sex")
 
 test_that("truncation declarations become a truncation() call", {
@@ -118,13 +120,28 @@ test_that("a false positive costs probability, it does not kill the draw", {
   # -Inf on a positive test in an uninfected state would discard the whole draw
   # over one test error. With a specificity it is merely improbable.
   expect_match(cr_ld(crt)$src, "log1p(-model.sp)", fixed = TRUE)
-  no_spec <- et_capture_recapture("caught", "p", test = "tested",
-                                  infected_states = 2L, sensitivity = "se")
+  no_spec <- et_capture_recapture("caught", "p", infected_states = 2L,
+                                  tests = et_test("tested", "se"))
   expect_match(cr_ld(no_spec)$src, "-Inf", fixed = TRUE)   # perfect test
 })
 
+test_that("several tests each contribute their own factor", {
+  # One test cannot identify sensitivity, specificity and prevalence at once,
+  # so more than one is the usual case rather than the exotic one.
+  src <- cr_ld(cr2)$src
+  for (nm in c("data.t1", "data.t2", "model.se1", "model.se2",
+               "model.sp1", "model.sp2")) {
+    expect_match(src, nm, fixed = TRUE)
+  }
+  # Both are read only where the individual was caught.
+  expect_equal(length(gregexpr("if y == 1", src, fixed = TRUE)[[1]]), 2L)
+  expect_true(julia_parses(spec_src(et_lfo_spec(cr2, plan),
+                                    plan_expr = "plan")))
+})
+
 test_that("a test without the parameters to score it is refused", {
-  expect_error(et_capture_recapture("caught", "p", test = "tested"),
+  expect_error(et_capture_recapture("caught", "p",
+                                    tests = et_test("tested", "se")),
                "infected_states")
 })
 
