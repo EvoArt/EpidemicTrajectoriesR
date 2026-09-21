@@ -1,8 +1,6 @@
-# Layer 2: the model-structure DSL -- states, aggregates, transitions, survival.
-#
-# One R constructor per ET concept, same name and same argument order, so a
-# model can be read across from the ET documentation (or translated back to
-# Julia) by eye.
+# The model-structure DSL: states, aggregates, transitions, survival. One R
+# constructor per ET concept, same names and argument order, so a model reads
+# across from the ET documentation.
 
 # ---- aggregates -------------------------------------------------------------
 
@@ -31,7 +29,7 @@ print.et_array <- function(x, ...) {
 #'
 #' This is ET's central design rule made available from R: the package attaches
 #' no meaning to these arrays, it only runs the update forwards and -- when the
-#' latent sampler removes an individual's contribution -- in reverse. That
+#' latent sampler removes an individual's contribution in reverse. That
 #' reversibility is what makes iFFBS both correct and cheap, so the `update` body
 #' is restricted to statements from which a reverse can be derived.
 #'
@@ -194,7 +192,7 @@ et_trans <- function(from, to, rate) {
 #'
 #' Mirrors ET's `@survival`: each non-death transition's rate is scaled by
 #' `fn`, and **every** live state gains a transition to `death` with the
-#' remaining mass -- including states that never appear as the source of a
+#' remaining mass: including states that never appear as the source of a
 #' declared transition.
 #'
 #' @param fn A survival function `(model, data, i, t)` returning P(survive the

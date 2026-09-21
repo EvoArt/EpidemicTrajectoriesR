@@ -7,20 +7,20 @@
 #'
 #' @section The shape of a model:
 #' \enumerate{
-#'   \item [et_aggregate()] -- the arrays tracked during the latent update, with
+#'   \item [et_aggregate()]: the arrays tracked during the latent update, with
 #'     their reversible updates. The package attaches no meaning to them.
-#'   \item [et_transitions()] -- the states, the transitions between them, and the
+#'   \item [et_transitions()]: the states, the transitions between them, and the
 #'     rate function for each. Optionally an [et_survival()] making every step
 #'     conditional on survival.
-#'   \item [et_data()] -- problem size, group structure, the observation process,
+#'   \item [et_data()]: problem size, group structure, the observation process,
 #'     and your own arrays.
-#'   \item [et_model()] -- parameters, priors, and deterministic
+#'   \item [et_model()]: parameters, priors, and deterministic
 #'     reparameterisations.
-#'   \item [et_sample()] -- Gibbs blocks and the run.
+#'   \item [et_sample()]: Gibbs blocks and the run.
 #' }
 #'
 #' @section Two things worth knowing up front:
-#' The likelihood has **two halves** -- the transitions and the observations --
+#' The likelihood has **two halves**: the transitions and the observations --
 #' and both are needed. This package always emits both when an observation
 #' process is given, and warns when one is not, because omitting the observation
 #' term is a silent modelling bug: every observation parameter would then be

@@ -17,7 +17,7 @@ et_residual_survival(
 \item{origin}{Clock origin per individual: the name of an \code{extras} vector, or
 a function of the individual index. Typically birth.}
 
-\item{condition_on}{A time the individual is KNOWN to have been alive --
+\item{condition_on}{A time the individual is known to have been alive --
 typically first capture. The CDF is renormalised by survival to here.}
 
 \item{censor_at}{When observation ends for an individual that does not die

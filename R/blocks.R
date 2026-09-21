@@ -1,9 +1,5 @@
-# Layer 3: Gibbs blocks.
-#
-# Each constructor returns a plain description; codegen.R turns it into one entry
-# of the Julia `Gibbs(...)`. Blocks are deliberately thin -- the interesting
-# decisions (which parameters go together, conjugate vs HMC) belong to the user,
-# and are worth judging on ESS/second rather than on s/sweep.
+# Gibbs blocks. Each constructor returns a plain description; codegen.R turns
+# it into one entry of the Julia `Gibbs(...)`.
 
 new_block <- function(kind, vars, ...) {
   structure(c(list(kind = kind, vars = vars), list(...)), class = "et_block")
@@ -54,7 +50,7 @@ et_hmc <- function(vars, n_steps = 15, step_size = NULL) {
 #' sampling.
 #'
 #' That difference matters more than it sounds. A hand-tuned metric has to be
-#' right in both ORDER and SCALE, and a scale that is far too small produces a
+#' right in both order and scale, and a scale that is far too small produces a
 #' chain that never moves while every acceptance diagnostic still looks healthy.
 #' Adapting removes that failure mode.
 #'
@@ -63,7 +59,7 @@ et_hmc <- function(vars, n_steps = 15, step_size = NULL) {
 #' @param n_steps Leapfrog steps per iteration, in warm-up and sampling alike.
 #' @param metric `"diagonal"` (the default), `"dense"` or `"unit"`. A dense
 #'   metric learns correlations between parameters, at the cost of estimating
-#'   many more entries during warm-up -- worth it when the posterior is strongly
+#'   many more entries during warm-up, worth it when the posterior is strongly
 #'   correlated and you can afford a long warm-up.
 #' @return An `et_block`.
 #' @seealso [et_hmc()] for a fixed metric you supply yourself, [et_nuts()] for
@@ -80,8 +76,8 @@ et_adaptive_hmc <- function(vars, target_accept = 0.8, n_steps = 15,
 #' The latent-trajectory block, resampled by iFFBS.
 #'
 #' Always present: if you omit it, one is added for you. The trajectory is stored
-#' as ONE whole-matrix latent, held constant during the gradients and updated
-#' once per Gibbs sweep -- which is the entire reason the Julia stack exists.
+#' as one whole-matrix latent, held constant during the gradients and updated
+#' once per Gibbs sweep, which is the entire reason the Julia stack exists.
 #'
 #' @param name The trajectory block's name. Leave as `"X"`.
 #' @param mh Use the Metropolis-corrected iFFBS proposal
@@ -125,7 +121,7 @@ et_conjugate <- function(name, family = c("beta", "dirichlet"), prior, count,
 #' Conjugate Beta kernel for a diagnostic test's sensitivity.
 #'
 #' Wraps `PracticalEpiBayes::test_sensitivity_kernel`. Assumes perfect
-#' specificity -- susceptibles never test positive -- so only infected tested cells
+#' specificity, susceptibles never test positive, so only infected tested cells
 #' contribute.
 #'
 #' @param name Parameter name.
@@ -191,7 +187,7 @@ et_conjugate_initial_state <- function(name, at = 1, states, prior = NULL,
 
 #' Drop in a raw Julia Gibbs kernel.
 #'
-#' The honest answer for a bespoke MH kernel the R DSL cannot express -- the
+#' The honest answer for a bespoke MH kernel the R DSL cannot express: the
 #' badger `xi` changepoint sampler is the worked example. `src` is a Julia
 #' expression evaluated inside the generated module, where the transpiled
 #' functions, `DATA` and the extras are all in scope.

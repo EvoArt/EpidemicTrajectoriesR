@@ -23,6 +23,6 @@ update body, exactly as \code{\link[=et_aggregate]{et_aggregate()}} does) alongs
 entries (whose reverse you write yourself). Use it when a model needs both.
 }
 \details{
-When every array is an \code{\link[=et_array]{et_array()}}, prefer \code{\link[=et_aggregate]{et_aggregate()}} -- it is the same
+When every array is an \code{\link[=et_array]{et_array()}}, prefer \code{\link[=et_aggregate]{et_aggregate()}}: it is the same
 thing with less ceremony.
 }

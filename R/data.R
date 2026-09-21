@@ -1,8 +1,6 @@
-# Layer 2: et_data() -- the R mirror of ET's epidemic_data().
-#
-# Argument for argument the same, with R spellings. Everything the package does
-# not name is the user's own: `extras` is ET's `extras...`, reachable as
-# `data$name` inside any transpiled body, and never looked inside.
+# et_data(): the R mirror of ET's epidemic_data(), argument for argument.
+# `extras` is ET's `extras...`, reachable as `data$name` in a transpiled body
+# and never looked inside.
 
 #' Build the model's fixed structure and tracked state.
 #'
@@ -14,9 +12,9 @@
 #' @param group Integer group index per individual. Used only by the default
 #'   `affected_individuals` and by whatever your own functions read off it.
 #' @param observation_process A function `(model, data, X, i, t)` returning a
-#'   per-state weight VECTOR.
+#'   per-state weight vector.
 #' @param observation_weight A function `(model, data, X, i, t, s)` returning the
-#'   SCALAR weight for state `s`. **This is the fast form** -- the likelihood needs
+#'   scalar weight for state `s`. **This is the fast form**: the likelihood needs
 #'   only one entry, so the scalar avoids allocating a weight vector per cell
 #'   under AD. Supply either or both; see ET's `epidemic_data` docs for when both
 #'   are needed.
@@ -24,7 +22,7 @@
 #'   observation factor scored in the LIKELIHOOD, when that differs from the
 #'   filter's `observation_weight`. This is ET's seam for keeping some
 #'   observation parameters conjugate: a process that factorises
-#'   multiplicatively (`w = capture x tests`) gives the PRODUCT as
+#'   multiplicatively (`w = capture x tests`) gives the product as
 #'   `observation_weight`, so the filter sees everything, and only the
 #'   non-conjugate FACTOR here. Because the weights multiply, the log-likelihood
 #'   is a sum of the factors' contributions, so dropping one drops exactly its
@@ -37,7 +35,7 @@
 #'   groupmates under a fixed `group`; pass [et_affected_from_groups()] for
 #'   time-varying membership, or an [et_julia()] expression for anything else.
 #' @param coupled_transitions List of `c(from, to)` pairs naming which of a
-#'   neighbour's transitions this individual can influence -- purely an
+#'   neighbour's transitions this individual can influence, purely an
 #'   optimisation, and often a large one.
 #' @param coupling_transitions An optional separate [et_transitions()] used for
 #'   the coupling term only (ET's `coupling_trans_mat`). Power users only.

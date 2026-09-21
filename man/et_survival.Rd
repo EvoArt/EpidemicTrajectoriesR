@@ -18,6 +18,6 @@ An object of class \code{et_survival}.
 \description{
 Mirrors ET's \verb{@survival}: each non-death transition's rate is scaled by
 \code{fn}, and \strong{every} live state gains a transition to \code{death} with the
-remaining mass -- including states that never appear as the source of a
+remaining mass: including states that never appear as the source of a
 declared transition.
 }

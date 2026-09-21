@@ -22,7 +22,7 @@ environment shipped with this package.}
 
 \item{dev}{Named character vector of local checkouts to \code{Pkg.develop}, e.g.
 \code{c(EpidemicTrajectories = "~/.julia/dev/EpidemicTrajectories")}. Use this
-when benchmarking or debugging local source changes -- without it the pinned
+when benchmarking or debugging local source changes; without it the pinned
 GitHub versions are used, and a local edit is invisible.}
 
 \item{ad_backends}{Extra automatic-differentiation backends to resolve and

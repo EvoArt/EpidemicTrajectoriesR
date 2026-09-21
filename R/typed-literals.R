@@ -1,5 +1,3 @@
-# Layer 1 (substrate): typed literals inside a transpiled body.
-
 #' Typed literals for a transpiled body.
 #'
 #' An accumulator started at a bare `1` is an integer, and becomes a
@@ -9,7 +7,7 @@
 #' automatic-differentiation scalar type instead, and `et_num()` converts a value
 #' to it.
 #'
-#' Use them for a value that will be combined with parameters. Do NOT use them
+#' Use them for a value that will be combined with parameters. Do not use them
 #' for an index or a loop counter -- those must stay integers.
 #'
 #' In R these are the identity, so a function using them still runs unchanged

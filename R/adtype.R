@@ -1,11 +1,6 @@
-# Layer 3: choosing the automatic-differentiation backend.
-#
-# The gradient is ~83% of a badger Gibbs sweep, so the backend is one of the
-# few genuinely consequential knobs an R user has. It is also the thing that
-# decides what a parameter is MADE of during a gradient, which is why the
-# transpiler never assumes Duals -- see ET_TYPE_VAR in transpile_fn.R.
+# AD backend selection. The gradient is around 83% of a badger sweep, so this
+# is one of the few knobs that really matters.
 
-# name -> (ADTypes constructor, Julia package that must be loaded first)
 .et_ad_backends <- list(
   forwarddiff = list(ctor = "AutoForwardDiff", pkg = NULL),
   polyester   = list(ctor = "AutoPolyesterForwardDiff", pkg = "PolyesterForwardDiff"),
@@ -39,7 +34,7 @@
 #' them with `et_setup(ad_backends = "mooncake")`, which resolves them into this
 #' package's pinned Julia project.
 #'
-#' No backend changes the answer -- only the time taken. If two backends disagree
+#' No backend changes the answer, only the time taken. If two backends disagree
 #' on a log density or a gradient, that is a bug, not a tuning question.
 #' @export
 et_adtype <- function(name = c("forwarddiff", "polyester", "reversediff",

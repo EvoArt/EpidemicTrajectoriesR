@@ -38,10 +38,10 @@ probability vector over states at the individual's first timepoint.}
 \code{affected_individuals} and by whatever your own functions read off it.}
 
 \item{observation_process}{A function \verb{(model, data, X, i, t)} returning a
-per-state weight VECTOR.}
+per-state weight vector.}
 
 \item{observation_weight}{A function \verb{(model, data, X, i, t, s)} returning the
-SCALAR weight for state \code{s}. \strong{This is the fast form} -- the likelihood needs
+scalar weight for state \code{s}. \strong{This is the fast form}: the likelihood needs
 only one entry, so the scalar avoids allocating a weight vector per cell
 under AD. Supply either or both; see ET's \code{epidemic_data} docs for when both
 are needed.}
@@ -50,7 +50,7 @@ are needed.}
 observation factor scored in the LIKELIHOOD, when that differs from the
 filter's \code{observation_weight}. This is ET's seam for keeping some
 observation parameters conjugate: a process that factorises
-multiplicatively (\verb{w = capture x tests}) gives the PRODUCT as
+multiplicatively (\verb{w = capture x tests}) gives the product as
 \code{observation_weight}, so the filter sees everything, and only the
 non-conjugate FACTOR here. Because the weights multiply, the log-likelihood
 is a sum of the factors' contributions, so dropping one drops exactly its
@@ -66,7 +66,7 @@ groupmates under a fixed \code{group}; pass \code{\link[=et_affected_from_groups
 time-varying membership, or an \code{\link[=et_julia]{et_julia()}} expression for anything else.}
 
 \item{coupled_transitions}{List of \code{c(from, to)} pairs naming which of a
-neighbour's transitions this individual can influence -- purely an
+neighbour's transitions this individual can influence, purely an
 optimisation, and often a large one.}
 
 \item{coupling_transitions}{An optional separate \code{\link[=et_transitions]{et_transitions()}} used for

@@ -1,14 +1,6 @@
-# Layer 1/2 boundary: function-level transpilation into ET's call protocols.
-#
-# `transpile.R` turns an expression into Julia text. This file wraps a whole R
-# function in the exact Julia signature ET will call it by, checks the R formals
-# against that protocol, and emits the element-type prologue for the roles that
-# return a per-state vector.
-#
-# Unlike BadgeR's twelve fixed engine roles, these are ET's actual call
-# conventions -- the ones documented on `epidemic_data`, `@transitions` and
-# `epidemic_obs_loglik`. A model's STRUCTURE is declared separately (spec.R), so
-# this table does not grow when a user writes a different model.
+# Wraps a whole R function in the Julia signature ET will call it by, checks
+# the formals against that protocol, and emits the element-type prologue for
+# the roles returning a per-state vector.
 
 .et_protocols <- list(
   rate           = list(args = c("model", "data", "i", "t"),           vector = FALSE),
@@ -38,7 +30,7 @@ et_protocols <- function() names(.et_protocols)
 #' forgo the speed-up described in DESIGN.md section 5. Pass `reads` to declare
 #' the parameters the body touches and keep the annotation.
 #'
-#' @param src Julia source for the function BODY (not the signature -- the
+#' @param src Julia source for the function BODY (not the signature, the
 #'   protocol's signature is generated around it).
 #' @param reads Optional character vector of parameter names the body reads. When
 #'   given, `depends=` derivation continues to work; it is then the caller's
@@ -120,9 +112,9 @@ et_transpile_role <- function(f, role, name, helpers = list()) {
   check_protocol_formals(f, spec$args, role, name)
 
   ctx <- new_ctx(helpers = helper_names, vector_result = spec$vector)
-  # A SCALAR role must return one concrete type. An R body naturally mixes
+  # A scalar role must return one concrete type. An R body naturally mixes
   # `return(1)` (an Int) with `return(1 - eta)` (whatever the parameters are),
-  # which makes the Julia return type a Union -- runtime dispatch in the hottest
+  # which makes the Julia return type a Union, runtime dispatch in the hottest
   # function in the package. Converting every returned value to `ETR_T` fixes it
   # without the user having to think about it, and `ETR_T` is the promotion of
   # exactly the parameters this body reads.
@@ -131,7 +123,7 @@ et_transpile_role <- function(f, role, name, helpers = list()) {
   reads <- ctx$reads$model
   used_helpers <- ctx$reads$helpers
 
-  # Reads reached through helpers count too -- that transitivity is exactly what
+  # Reads reached through helpers count too, that transitivity is exactly what
   # makes an automatically derived `depends=` trustworthy.
   reads <- union(reads, helper_reads(used_helpers, helpers))
   opaque <- any(vapply(helpers[helper_names %in% used_helpers],
@@ -145,13 +137,13 @@ et_transpile_role <- function(f, role, name, helpers = list()) {
        reads = reads, opaque = opaque, helpers = used_helpers)
 }
 
-# The name of the parameter-scalar-type variable the generator binds. NOT `T`:
+# The name of the parameter-scalar-type variable the generator binds. not `T`:
 # R spells `TRUE` as `T`, so a body containing a bare `T` would be ambiguous, and
 # a user local named `T` would shadow the binding.
 ET_TYPE_VAR <- "ETR_T"
 
 # `ETR_T` is the promotion of the element types of every parameter the body
-# reads. It is NOT "the Dual type": what the parameters are made of depends on
+# reads. It is not "the Dual type": what the parameters are made of depends on
 # the autodiff backend, and only FORWARD mode makes them Duals --
 #
 #   ForwardDiff / PolyesterForwardDiff : Dual
@@ -166,8 +158,8 @@ ET_TYPE_VAR <- "ETR_T"
 # with the backend's differentiable type when they sit in an HMC block.
 # That distinction is a real bug source.
 #
-# Everything the generator emits against it -- `convert(ETR_T, x)`, `one(ETR_T)`,
-# `zeros(ETR_T, n)` -- is defined across all three families. A type CONSTRUCTOR
+# Everything the generator emits against it, `convert(ETR_T, x)`, `one(ETR_T)`,
+# `zeros(ETR_T, n)`: is defined across all three families. A type CONSTRUCTOR
 # call would not be.
 eltype_prologue <- function(reads) {
   if (!length(reads)) return(paste0(ET_TYPE_VAR, " = Float64"))

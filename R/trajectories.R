@@ -1,31 +1,11 @@
-# Layer 3: the trajectory archive -- and keeping it in a format R can read.
+# PracticalBayes streams trajectories to disc as JLD2. This converts the
+# archive to .rds so an R user is not left holding files only Julia can open.
 #
-# `et_sample(save_x =)` streams the latent trajectory to disc through
-# PracticalBayes, whose disk backend is JLD2. That is a Julia format: an R user
-# who asked for their trajectories should not be left holding files only Julia
-# can open. So the archive is CONVERTED to `.rds` after sampling, in the
-# directory they named, and the Julia originals are removed as each one is
-# converted.
-#
-# Conversion is deliberately a separate, exported step rather than something
-# buried in `et_sample()`. A fit that crashed part-way through -- as a long
-# badger run can -- still leaves every already-flushed chunk complete and
-# readable on disc (one file per flush, never appended to), so pointing
-# `et_convert_trajectories()` at the template afterwards recovers them. That is
-# also why it converts one chunk at a time and only deletes a source file once
-# its `.rds` exists: an interrupted conversion loses nothing.
-#
-# The cost is per FLUSH, not per sweep -- once every `save_every` sweeps against
-# thousands of gradient evaluations -- so it is not on any hot path.
+# Conversion is a separate exported step, not folded into et_sample(): a run
+# that dies part-way still leaves every flushed chunk complete, and pointing
+# et_convert_trajectories() at the template afterwards recovers them. One
+# chunk at a time, deleting a source only once its .rds exists.
 
-# --- chunk discovery ---------------------------------------------------------
-#
-# PracticalBayes writes one file per flush, named `<base>_iters_<a>_to_<b><ext>`
-# (see `chunk_path` in its save_states.jl). Both the converter and the residuals
-# reader need to find those files and put them in sweep order, so the logic
-# lives here once. Ordering is by FIRST ITERATION as an integer -- sorting the
-# names as strings would put `_iters_1000_` before `_iters_101_` and score every
-# trajectory against the wrong parameter draw, silently.
 et_chunk_files <- function(template) {
   base <- tools::file_path_sans_ext(template)
   ext  <- tools::file_ext(template)
@@ -45,7 +25,7 @@ et_chunk_files <- function(template) {
 # Escape a literal string for use inside a regex: a stem or extension may
 # contain `.`, which would otherwise match any character. The metacharacters are
 # matched as a FIXED set character by character rather than by a regex of their
-# own -- writing that pattern is how this went wrong the first time (`{}` inside
+# own. Writing that pattern is how this went wrong the first time (`{}` inside
 # a bracket expression is read as a repetition count by TRE).
 et_regex_escape <- function(s) {
   meta <- c(".", "\\", "^", "$", "|", "?", "*", "+", "(", ")", "[", "]", "{", "}")
@@ -102,8 +82,8 @@ et_convert_trajectories <- function(template, keep_jld2 = FALSE, quiet = FALSE) 
     # whole point is never to hold the run at once.
     # Stacked to a 3-D array (time x individual x draw) on the Julia side. A
     # `Vector{Matrix}` comes back as an opaque `JuliaObject` rather than a list
-    # of R matrices, so the chunk is marshalled as ONE array -- which crosses as
-    # a plain R array -- and split here.
+    # of R matrices, so the chunk is marshalled as one array, which crosses as
+    # a plain R array, and split here.
     arr <- JuliaCall::julia_eval(sprintf(paste0(
       "JLD2.jldopen(%s, \"r\") do f; s = f[\"states\"]; ",
       "isempty(s) ? Array{Int}(undef, 0, 0, 0) : ",
@@ -133,9 +113,9 @@ et_convert_trajectories <- function(template, keep_jld2 = FALSE, quiet = FALSE) 
 #' `n_timepoints x n_individuals` integer matrices of 1-based state codes.
 #'
 #' Selecting `draws` reads only the chunks that contain them, so inspecting a
-#' handful out of thousands does not read the whole archive. Reading them ALL is
-#' what the archive exists to avoid -- [et_residuals()] scores them one chunk at
-#' a time without ever materialising the run -- so pass `draws` unless the
+#' handful out of thousands does not read the whole archive. Reading them all is
+#' what the archive exists to avoid: [et_residuals()] scores them one chunk at
+#' a time without ever materialising the run, so pass `draws` unless the
 #' archive is small.
 #'
 #' @param fit An [et_fit()] from [et_sample()] run with `save_x =`, or a path

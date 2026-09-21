@@ -18,16 +18,16 @@ et_residual_waiting(
 
 \item{origin}{Where the clock starts:
 \itemize{
-\item \code{"entry_to_from_state"} -- when the individual entered \code{from}, read from
+\item \code{"entry_to_from_state"}, when the individual entered \code{from}, read from
 the trajectory. Right for a latent period: the clock starts at exposure.
-\item \code{"window_start"} -- when observation started. Right for an exposure time:
+\item \code{"window_start"}: when observation started. Right for an exposure time:
 a susceptible individual was already susceptible when watching began, so
 its clock cannot start at entry to \code{S}.
 }}
 
 \item{censor_at}{Character vector naming what ends observation.
 \code{"window_end"} is the individual's own sampling window; any other entry is
-read as a STATE, censoring at the last step before it was entered. The
+read as a state, censoring at the last step before it was entered. The
 earliest applicable one wins.
 
 A competing risk belongs here rather than being dropped: an individual that

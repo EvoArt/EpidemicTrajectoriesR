@@ -1,5 +1,3 @@
-# Layer 3: the fit object and its R-side conversions.
-
 #' @export
 print.et_fit <- function(x, ...) {
   cat("<et_fit> ", x$n_sweeps, " sweeps (burn ", x$n_burn, ", seed ", x$seed,

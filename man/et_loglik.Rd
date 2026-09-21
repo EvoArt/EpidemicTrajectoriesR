@@ -11,7 +11,7 @@ et_loglik(model, blocks = list(), x_init = NULL)
 
 \item{blocks}{The same sampler blocks you will pass to \code{\link[=et_sample]{et_sample()}}. They do
 not affect the log density, but passing them makes this call generate the
-SAME Julia module the fit will use, so nothing is compiled twice -- and a
+same Julia module the fit will use, so nothing is compiled twice, and a
 model with a conjugate-owned parameter needs its kernel declared to build at
 all.}
 

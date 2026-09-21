@@ -1,8 +1,5 @@
-# Layer 3: priors -- a thin naming layer over Distributions.jl.
-#
-# Only the families epidemic models actually use are named. `et_dist()` is the
-# escape hatch for everything else, so an unlisted distribution is an
-# inconvenience rather than a wall.
+# Priors: a naming layer over Distributions.jl. Only the families epidemic
+# models actually use are named; et_dist() covers the rest.
 
 new_dist <- function(name, args, vector_arg = FALSE) {
   structure(list(name = name, args = args, vector_arg = vector_arg),
@@ -17,7 +14,7 @@ new_dist <- function(name, args, vector_arg = FALSE) {
 #' @param shape,scale Gamma parameters (Julia's `Gamma(shape, scale)`).
 #' @param a,b Beta / Uniform parameters.
 #' @param rate Exponential rate; emitted as `Exponential(1 / rate)` because
-#'   Julia's `Exponential` is parameterised by SCALE, which is the single most
+#'   Julia's `Exponential` is parameterised by scale, which is the single most
 #'   likely thing for an R user to get backwards.
 #' @param alpha Dirichlet concentration vector.
 #' @param d A distribution to truncate.

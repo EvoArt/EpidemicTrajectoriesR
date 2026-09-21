@@ -21,7 +21,7 @@ An object of class \code{et_aggregate}.
 \description{
 This is ET's central design rule made available from R: the package attaches
 no meaning to these arrays, it only runs the update forwards and -- when the
-latent sampler removes an individual's contribution -- in reverse. That
+latent sampler removes an individual's contribution in reverse. That
 reversibility is what makes iFFBS both correct and cheap, so the \code{update} body
 is restricted to statements from which a reverse can be derived.
 }

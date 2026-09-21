@@ -21,6 +21,6 @@ An \code{et_block}.
 }
 \description{
 Wraps \code{PracticalEpiBayes::test_sensitivity_kernel}. Assumes perfect
-specificity -- susceptibles never test positive -- so only infected tested cells
+specificity, susceptibles never test positive, so only infected tested cells
 contribute.
 }

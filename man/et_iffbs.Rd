@@ -17,6 +17,6 @@ An \code{et_block}.
 }
 \description{
 Always present: if you omit it, one is added for you. The trajectory is stored
-as ONE whole-matrix latent, held constant during the gradients and updated
-once per Gibbs sweep -- which is the entire reason the Julia stack exists.
+as one whole-matrix latent, held constant during the gradients and updated
+once per Gibbs sweep, which is the entire reason the Julia stack exists.
 }

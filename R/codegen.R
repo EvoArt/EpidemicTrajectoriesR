@@ -1,18 +1,14 @@
-# Layer 3: code generation.
+# Turns an et_model plus its blocks into a self-contained Julia module.
 #
-# Turns an et_model plus its blocks into ONE self-contained Julia module. See
-# DESIGN.md section 2 for why source text rather than call-by-call API driving:
-# three of the four ET/PB declaration points are macros, which cannot be reached
-# through JuliaCall at all, and a generated module compiles once and stays
-# concretely typed.
+# Source text rather than call-by-call API driving, because three of the four
+# ET/PB declaration points are macros and JuliaCall cannot reach those. The
+# generated module also compiles once and stays concretely typed.
 #
-# The generated source is a first-class artefact, not a hidden intermediate:
-# et_julia_source() returns it, it runs standalone, and it is what a user shows a
-# Julia-literate colleague when something goes wrong.
+# et_julia_source() returns the source; it runs standalone.
 
 #' Generate the Julia source for a model.
 #'
-#' Works without a Julia session -- useful for inspection, for review, and as the
+#' Works without a Julia session: useful for inspection, for review, and as the
 #' on-ramp to writing the model in Julia directly.
 #'
 #' @param model An [et_model()].
@@ -76,7 +72,7 @@ generate_module <- function(model, blocks, module_name) {
   payload <- list()
 
   # A payload entry is an R array assigned into Julia's `Main` before the module
-  # loads; the module re-binds it with an EXPLICIT element type, so nothing
+  # loads; the module re-binds it with an explicit element type, so nothing
   # downstream depends on how JuliaCall happened to marshal it.
   add_payload <- function(name, value) {
     payload[[paste0(prefix, name)]] <<- value
@@ -132,7 +128,7 @@ generate_module <- function(model, blocks, module_name) {
   }
 
   # The likelihood's own observation factor, when it differs from the filter's.
-  # Its reads - NOT the filter weight's - are what drive the observation term's
+  # Its reads, not the filter weight's, are what drive the observation term's
   # `depends=`: the filter is never differentiated, so a parameter that appears
   # only there contributes nothing to any gradient.
   lik_weight_name <- NULL
@@ -147,7 +143,7 @@ generate_module <- function(model, blocks, module_name) {
 
   # A user-supplied coupling term replaces the whole default. It is an
   # et_julia() body, so it needs wrapping in ET's `rest_contribution` signature
-  # -- splicing the body straight into the keyword would put statements inside a
+  # Splicing the body straight into the keyword would put statements inside a
   # call's parentheses.
   #
   # `affected_override` is part of that signature and is usually ignored; the
@@ -159,7 +155,7 @@ generate_module <- function(model, blocks, module_name) {
   }
 
   # A separate coupling spec: the rates ET evaluates for the coupling term only,
-  # which is never differentiated. Its reads are NOT added to `depends`, because
+  # which is never differentiated. Its reads are not added to `depends`, because
   # `epidemic_loglik` never sees it.
   coupling_names <- NULL
   if (!is.null(d$coupling_transitions)) {
@@ -210,7 +206,7 @@ generate_module <- function(model, blocks, module_name) {
                       "et_coupsurvival_fn" else NULL)
   } else NULL
   # When any tracked array carries a hand-written reverse, the `@aggregate` macro
-  # cannot be used at all, so EVERY array is emitted through ET's verbose
+  # cannot be used at all, so every array is emitted through ET's verbose
   # fallback: a plain NamedTuple plus a tuple of reversible summary functions.
   agg <- d$aggregates
   summary_names <- character()
@@ -262,7 +258,7 @@ generate_module <- function(model, blocks, module_name) {
   run_src <- run_src_for(model, has_obs)
   population_src <- population_src_for(model, has_obs)
 
-  # NO TIMESTAMP. The module name is a hash of this text, so a header that
+  # no timestamp. The module name is a hash of this text, so a header that
   # varied with the clock would make every generation a fresh module and force a
   # full recompile of the stack on each call.
   header <- sprintf(paste0(
@@ -320,14 +316,14 @@ julia_usings <- function() paste(
   "using AdvancedHMC: Leapfrog, DiagEuclideanMetric",
   "using StableRNGs: StableRNG",
   "import AbstractMCMC",
-  # The AD backend is a RUNTIME argument to et_run, not a compile-time constant,
+  # The AD backend is a runtime argument to et_run, not a compile-time constant,
   # so switching backend does not force the module to be regenerated.
   "import ADTypes",
   sep = "\n")
 
 # ---- payload typing ---------------------------------------------------------
 
-# Bind an R-marshalled value under an EXPLICIT Julia type. Concrete types are
+# Bind an R-marshalled value under an explicit Julia type. Concrete types are
 # the first performance rule in the Julia stack, and JuliaCall's own conversion is not
 # something to depend on: an R integer may arrive as Int32, a 1-column matrix as
 # a vector. Converting here makes the module's types a property of the generated
@@ -389,12 +385,12 @@ transitions_src <- function(const_name, spec, rate_names, surv_name) {
 #
 # Two shapes, decided by whether any array carries a hand-written reverse:
 #
-#   * ALL derived  -> the `@aggregate` macro, which allocates the arrays and
+#   * all derived  -> the `@aggregate` macro, which allocates the arrays and
 #     writes both directions of each update from its `+=` shape.
-#   * ANY hand-written -> ET's verbose fallback: a plain NamedTuple of arrays
+#   * any hand-written -> ET's verbose fallback: a plain NamedTuple of arrays
 #     plus a tuple of `(model, data, X, s, i, t, reverse)` functions. The macro
 #     cannot be mixed with it, so when one array needs a hand-written reverse
-#     EVERY array is emitted this way and the derived ones get generated
+#     every array is emitted this way and the derived ones get generated
 #     functions of the same shape.
 aggregate_src <- function(aggs, summary_fns = list()) {
   if (!length(aggs$hand_names %||% character())) {
@@ -415,7 +411,7 @@ aggregate_src <- function(aggs, summary_fns = list()) {
   sprintf("const AGGS = (; %s)", paste(alloc, collapse = ", "))
 }
 
-# The generated counterpart of the `@aggregate` lines for ONE array, used on the
+# The generated counterpart of the `@aggregate` lines for one array, used on the
 # fallback path: a reversible summary function of the shape ET calls.
 #
 # Built from the parsed records rather than by rewriting the rendered text, so a
@@ -439,7 +435,7 @@ derived_summary_src <- function(name, records, array_names) {
     name, indent(paste(body, collapse = "\n")))
 }
 
-# A tracked array is written as a bare name in an update body -- that is the
+# A tracked array is written as a bare name in an update body. That is the
 # vocabulary `@aggregate` establishes, and the macro rewrites it to
 # `data.aggregates.<name>` before ET ever sees it. A hand-written summary reaches
 # ET directly, so the same rewrite has to happen here.
@@ -898,7 +894,7 @@ run_src_for <- function(model, has_obs) {
 
 # The `depends=` validator PERF_REPORT_2026-08-25.md section 6.1 proposed: move
 # one parameter at a time and see which likelihood terms move with it. A term
-# that moves when a parameter NOT in its declared set is perturbed has an
+# that moves when a parameter not in its declared set is perturbed has an
 # under-declared `depends=`, which would silently zero that parameter's gradient
 # contribution.
 #

@@ -1,23 +1,10 @@
-# Layer 3: the two diagnostics that do not fit the per-individual archive route.
+# The two diagnostics that cannot go through the per-individual archive.
 #
-# `et_residuals()` scores an ARCHIVE: sample with `save_x =`, read the
-# trajectories back, score them. That is the right default, but it fails at both
-# ends of the size range for opposite reasons, and each end has a Julia-side
-# answer this file exposes:
-#
-#   * too big to archive -- `et_collect()` wraps `SummaryCollector`, scoring each
-#     draw as it is produced and keeping only the residuals. On the badger model
-#     that is ~9.5 MB per summary against ~15 GB of trajectories.
-#
-#   * not computable one individual at a time -- `et_reproduction_numbers()`
-#     wraps `case_reproduction_numbers`. R_i needs every infective present in the
-#     group at the moment of an infection, so it takes a whole-population pass
-#     and cannot use the `(model, data, X, i, rng)` contract the residuals do.
-#
-# Both take the SAME declared force-of-infection decomposition idea the rest of
-# the package uses: the user names the components as ordinary rate functions and
-# says which one is transmission. The package sums and normalises them and never
-# needs to know what any of them means.
+# et_collect() scores each draw as it is produced and keeps only the
+# residuals: about 9.5 MB per summary against ~15 GB of badger
+# trajectories. et_reproduction_numbers() needs every infective in the group
+# at the moment of infection, so it takes a whole-population pass instead of
+# the (model, data, X, i, rng) contract the residuals use.
 
 #' Score residuals during the fit, without ever storing a trajectory.
 #'
@@ -26,13 +13,13 @@
 #' so nothing about the trajectory is retained.
 #'
 #' Use this when the archive would be too large to keep: the trajectory is
-#' `n_timepoints x n_individuals` integers EVERY sweep, and `save_every` is a
+#' `n_timepoints x n_individuals` integers every sweep, and `save_every` is a
 #' flush interval rather than thinning, so a long run over a large population
 #' archives everything. Storage here is `n_individuals x n_keep` doubles per
-#' residual instead -- on the badger model ~9.5 MB per residual against ~15 GB
+#' residual instead: on the badger model ~9.5 MB per residual against ~15 GB
 #' of trajectories.
 #'
-#' The trade is that the residuals must be decided BEFORE the fit. Archiving
+#' The trade is that the residuals must be decided before the fit. Archiving
 #' lets you add new ones later without refitting; this does not.
 #'
 #' @param model An [et_model()].
@@ -147,19 +134,19 @@ residual_frame <- function(raw, names_v) {
 #' The package cannot split a force of infection by itself: `S -> E` is one rate
 #' function returning one number, and nothing in it says which part is background
 #' and which is transmission. So you declare the parts, exactly as you declare
-#' rates and aggregates -- as ordinary R rate functions of `(model, data, i, t)`
+#' rates and aggregates, as ordinary R rate functions of `(model, data, i, t)`
 #' -- and say which one is transmission via `secondary`. The package sums them,
 #' normalises, and never needs to know what any of them means.
 #'
 #' For each infection event, the transmission component of the victim's force of
 #' infection is shared among the infectives in its group in proportion to
 #' `weight`. Background infections are attributed to nobody, which is the point
-#' of the split. An individual that was never infectious gets `NA` -- it had no
+#' of the split. An individual that was never infectious gets `NA`: it had no
 #' opportunity to infect anyone, which differs from having had the opportunity
 #' and infected nobody (a genuine `0`).
 #'
 #' @param fit An [et_fit()] from [et_sample()] run with `save_x =`.
-#' @param components Named list of rate functions -- the force-of-infection
+#' @param components Named list of rate functions, the force-of-infection
 #'   decomposition. Each is written in the same R subset as any other rate
 #'   function, taking `(model, data, i, t)`.
 #' @param secondary Name of the component that is transmission (the part
@@ -200,15 +187,15 @@ et_reproduction_numbers <- function(fit, components, secondary,
          "from and to.", call. = FALSE)
   }
 
-  # Each component is written as a RATE function -- same subset, same
-  # `(model, data, i, t)` contract as anything in et_transitions() -- so it goes
+  # Each component is written as a rate function: same subset, same
+  # `(model, data, i, t)` contract as anything in et_transitions(), so it goes
   # through the same transpiler with the same role. Emitting them as named
   # functions (rather than inline lambdas) keeps a transpile error pointing at
   # the component's own name.
   #
   # ET calls the components with X as well, `(model, data, X, i, t)`, because a
   # component is free to look at the trajectory. The transpiled body does not
-  # take X, so each is wrapped to drop it. Keeping the USER-FACING contract equal
+  # take X, so each is wrapped to drop it. Keeping the user-facing contract equal
   # to every other rate function is worth one wrapper here.
   comp_names <- paste0("etr_rn_comp_", names(components))
   comp_defs <- vapply(seq_along(components), function(k) {
@@ -218,7 +205,7 @@ et_reproduction_numbers <- function(fit, components, secondary,
                       names(components), comp_names)
 
   # `weight` is relative infectiousness at (i, t). It is not one of the declared
-  # protocols -- it takes X as well as (i, t) -- so it must be an et_julia().
+  # protocols: it takes X as well as (i, t), so it must be an et_julia().
   if (is.null(weight)) {
     wt_src <- "nothing"
   } else if (inherits(weight, "et_julia")) {

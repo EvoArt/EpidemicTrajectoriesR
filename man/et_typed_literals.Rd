@@ -28,7 +28,7 @@ automatic-differentiation scalar type instead, and \code{et_num()} converts a va
 to it.
 }
 \details{
-Use them for a value that will be combined with parameters. Do NOT use them
+Use them for a value that will be combined with parameters. Do not use them
 for an index or a loop counter -- those must stay integers.
 
 In R these are the identity, so a function using them still runs unchanged

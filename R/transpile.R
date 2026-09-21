@@ -1,20 +1,15 @@
-# Layer 1 (substrate): the R -> Julia expression transpiler.
+# The R -> Julia expression transpiler. Walks the parsed R AST and emits
+# Julia source.
 #
-# Walks the parsed R AST and emits Julia source text. Deliberately narrow:
-# it supports exactly the constructs needed to write the leaf functions ET calls
-# (rates, survival, starting states, observation weights) and their helpers.
-# Anything outside that subset raises an error naming the offending node -- the
-# alternative, emitting something plausible, would produce a model that runs and
-# is wrong, which is the failure mode this whole codebase is most allergic to.
+# Deliberately narrow: only the constructs needed for the leaf functions ET
+# calls (rates, survival, starting states, observation weights) and their
+# helpers. Anything else errors, naming the offending node. Emitting
+# something plausible would give a model that runs and is wrong.
 #
-# Generalised from BadgeR/R/transpile.R. The differences from that version are
-# listed in DESIGN.md section 3; the two that matter are (a) `model$x` maps to a
-# plain `model.x` because ET's `model` is a NamedTuple of values, not BIID's
-# nested parameter blocks, and (b) every `model$x` read is RECORDED, which is
-# what lets the generator derive `depends=` instead of asking the user for it.
-#
-# Indexing: R and Julia are both 1-based and column-major, so `x[i]` / `x[i, j]`
-# pass through unchanged. That is the fact the whole approach rests on.
+# `model$x` maps to plain `model.x`, since ET's `model` is a NamedTuple of
+# values. Each such read is recorded, which is what lets codegen.R work out
+# `depends=` instead of asking for it. Indexing passes through unchanged --
+# both languages are 1-based and column-major.
 
 # ---- transpiler context -----------------------------------------------------
 
@@ -57,7 +52,7 @@ new_ctx <- function(helpers = character(), vector_result = FALSE,
 
 # Binary operators mapped R -> Julia. R's `&&`/`||` and `&`/`|` mean the same
 # things in Julia; `%%` and `%/%` do not have identical negative-operand
-# semantics and so are NOT included.
+# semantics and so are not included.
 .et_binop_map <- c(
   "+" = "+", "-" = "-", "*" = "*", "/" = "/", "^" = "^",
   "==" = "==", "!=" = "!=", "<" = "<", ">" = ">",
@@ -213,13 +208,13 @@ transpile_for <- function(e, ctx) {
 
 # `state == "I"` must reach Julia as `state == :I`: inside an @aggregate body ET
 # compares the applied state against a Symbol from the declared state space.
-# Comparing against a state name. Two DIFFERENT things wear the same syntax, and
+# Comparing against a state name. Two different things wear the same syntax, and
 # getting them the wrong way round is silent:
 #
 #   * `state` is the Symbol ET applies or reverses, so `state == "I"` is
 #     `state == :I`;
 #   * the trajectory holds integer CODES, so `X[t+1, i] == "E"` is
-#     `X[t+1, i] == 2` -- its position in the state space.
+#     `X[t+1, i] == 2`, its position in the state space.
 #
 # Emitting `:E` for the second would compare an Int to a Symbol: never true, no
 # error, and a tracked array that quietly counts nothing.
@@ -316,7 +311,7 @@ transpile_call <- function(e, ctx, op) {
     return(paste0("eachindex(", arg_src, ")"))
   }
   # Typed literals. An accumulator started at a bare `1` is an Int, and becomes a
-  # `Union{Int, <parameter type>}` once a parameter multiplies into it -- runtime
+  # `Union{Int, <parameter type>}` once a parameter multiplies into it, runtime
   # dispatch in the hottest loop in the package. `et_one()` / `et_zero()` /
   # `et_num(x)` start it at the parameter scalar type instead. They are ordinary
   # R functions too, so a body using them still runs unchanged in R.

@@ -1,18 +1,12 @@
-# Layer 1 (substrate): emitting Julia literals from R values.
+# Julia literals from R values. Knows nothing about epidemics or
+# PracticalBayes.
 #
-# Nothing in this file knows about epidemics, EpidemicTrajectories or
-# PracticalBayes. It is the piece a future PracticalBayesR would share.
-#
-# The governing concern throughout is CONCRETE TYPES. An abstractly-typed
-# field or container costs ~5x in the Julia stack below and is
-# invisible to inference checks, so every literal emitted here carries its
-# element type explicitly rather than letting Julia infer one from a promoted
-# mixture.
+# Every literal carries its element type explicitly. Letting Julia infer one
+# from a promoted mixture gives an abstractly-typed container, which costs
+# about 5x downstream and does not show up in inference checks.
 
 # ---- scalars ----------------------------------------------------------------
 
-# Format one number as Julia source. Integers stay integral (so they remain
-# usable as indices and loop bounds); doubles keep full round-trip precision.
 julia_num <- function(x) {
   if (is.logical(x)) return(if (isTRUE(x)) "true" else "false")
   if (is.na(x)) stop("cannot emit NA as a Julia literal.")
@@ -20,7 +14,7 @@ julia_num <- function(x) {
   if (!is.finite(x)) {
     return(if (is.nan(x)) "NaN" else if (x > 0) "Inf" else "-Inf")
   }
-  # A whole-number double is emitted with a `.0` suffix ONLY where the context
+  # A whole-number double is emitted with a `.0` suffix only where the context
   # wants a Float64; callers that need an index use julia_int().
   #
   # Shortest round-tripping representation: `digits = 17` always round-trips but
