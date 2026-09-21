@@ -494,7 +494,7 @@ placeholder_defs <- function(model) {
     p <- model$parameters[[nm]]
     if (p$kind != "latent") next
     if (length(p$dim) != 2L) {
-      stop("et_par(): kind = \"latent\" is currently supported only for ",
+      stop("prior(): kind = \"latent\" is currently supported only for ",
            "matrix-valued parameters (dim of length 2). Parameter '", nm,
            "' has dim of length ", length(p$dim),
            ". A scalar or vector parameter sampled by a conjugate kernel should ",

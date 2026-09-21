@@ -24,7 +24,7 @@ test_that("the module name is a function of the CONTENT", {
   expect_equal(a$module, b$module)
   expect_equal(a$src, b$src)
   # A changed model gets a different module.
-  m2 <- toy_model(); m2$parameters$alpha <- et_par(et_gamma(2, 2), init = 0.05)
+  m2 <- toy_model(); m2$parameters$alpha <- prior(gamma_dist(2, 2), init = 0.05)
   expect_false(identical(et_julia_source(m2, toy_blocks())$module, a$module))
 })
 
@@ -101,10 +101,10 @@ test_that("a model with no observation process emits only the epidemic term", {
     starting_state = toy_start, aggregates = toy_aggregate(),
     group = rep(seq_len(TOY_PENS), each = TOY_PER_PEN)))
   m <- et_model(data = d, parameters = list(
-    alpha = et_par(et_gamma(1, 1), init = 0.05),
-    beta  = et_par(et_gamma(1, 1), init = 0.05),
-    m     = et_par(et_gamma(2, 4), init = 5.0),
-    nu    = et_par(et_beta(1, 1), init = 0.1)))
+    alpha = prior(gamma_dist(1, 1), init = 0.05),
+    beta  = prior(gamma_dist(1, 1), init = 0.05),
+    m     = prior(gamma_dist(2, 4), init = 5.0),
+    nu    = prior(beta_dist(1, 1), init = 0.1)))
   s <- et_julia_source(m)$src
   expect_match(s, "@addlogprob! loglik_fn(pars, data, X)", fixed = TRUE)
   expect_false(grepl("obs_loglik_fn", s, fixed = TRUE))
@@ -125,9 +125,9 @@ test_that("priors, deterministics and the trajectory block render in the model",
 test_that("a vector parameter becomes filldist", {
   d <- toy_data()
   m <- et_model(data = d, parameters = list(
-    alpha = et_par(et_beta(1, 1), init = rep(0.5, 3), n = 3),
-    nu = et_par(et_beta(1, 1), init = 0.1), theta = et_par(et_beta(1, 1), init = 0.5),
-    beta = et_par(et_beta(1,1), init = 0.1), m = et_par(et_gamma(2,4), init = 5)))
+    alpha = prior(beta_dist(1, 1), init = rep(0.5, 3), n = 3),
+    nu = prior(beta_dist(1, 1), init = 0.1), theta = prior(beta_dist(1, 1), init = 0.5),
+    beta = prior(beta_dist(1,1), init = 0.1), m = prior(gamma_dist(2,4), init = 5)))
   expect_match(et_julia_source(m)$src,
                "alpha ~ PracticalBayes.filldist(Beta(1.0, 1.0), 3)", fixed = TRUE)
 })
@@ -187,9 +187,9 @@ test_that("the entry gate is emitted only when asked for, with its survival", {
     observation_weight = toy_obs,
     extras = list(y = toy_y(), entry = rep(1L, TOY_N)))
   m0 <- et_model(data = d, parameters = list(
-    alpha = et_par(et_gamma(1, 1), init = 0.05), beta = et_par(et_gamma(1, 1), init = 0.05),
-    nu = et_par(et_beta(1, 1), init = 0.1), theta = et_par(et_beta(1, 1), init = 0.5),
-    c1 = et_par(et_exponential(1), init = 0.1)))
+    alpha = prior(gamma_dist(1, 1), init = 0.05), beta = prior(gamma_dist(1, 1), init = 0.05),
+    nu = prior(beta_dist(1, 1), init = 0.1), theta = prior(beta_dist(1, 1), init = 0.5),
+    c1 = prior(exponential_dist(1), init = 0.1)))
   expect_match(et_julia_source(m0)$src, "const LOGLIK = epidemic_loglik(DATA)",
                fixed = TRUE)
 
@@ -214,9 +214,9 @@ test_that("a separate likelihood weight is wired to epidemic_obs_loglik", {
     helpers = list(et_helper(toy_obs, "toy_obs")),
     extras = list(y = toy_y()))
   m <- et_model(data = d, parameters = list(
-    alpha = et_par(et_gamma(1, 1), init = 0.05), beta = et_par(et_gamma(1, 1), init = 0.05),
-    m = et_par(et_gamma(2, 4), init = 5), nu = et_par(et_beta(1, 1), init = 0.1),
-    theta = et_par(et_beta(1, 1), init = 0.5), eta = et_par(et_beta(1, 1), init = 0.3)))
+    alpha = prior(gamma_dist(1, 1), init = 0.05), beta = prior(gamma_dist(1, 1), init = 0.05),
+    m = prior(gamma_dist(2, 4), init = 5), nu = prior(beta_dist(1, 1), init = 0.1),
+    theta = prior(beta_dist(1, 1), init = 0.5), eta = prior(beta_dist(1, 1), init = 0.3)))
   g <- et_julia_source(m)
   expect_match(g$src,
                "epidemic_obs_loglik(DATA; observation_weight=et_obs_lik_weight)",
@@ -251,9 +251,9 @@ test_that("time-varying affected lists are built in the generated module", {
 test_that("a conjugate-owned parameter gets a placeholder distribution", {
   d <- toy_data()
   m <- et_model(data = d, parameters = list(
-    alpha = et_par(et_gamma(1, 1), init = 0.05), beta = et_par(et_gamma(1, 1), init = 0.05),
-    m = et_par(et_gamma(2, 4), init = 5), theta = et_par(et_beta(1, 1), init = 0.5),
-    nu = et_par(init = c(0.05, 0.05, 0.05, 0.05), dim = c(2, 2), kind = "latent")))
+    alpha = prior(gamma_dist(1, 1), init = 0.05), beta = prior(gamma_dist(1, 1), init = 0.05),
+    m = prior(gamma_dist(2, 4), init = 5), theta = prior(beta_dist(1, 1), init = 0.5),
+    nu = prior(init = c(0.05, 0.05, 0.05, 0.05), dim = c(2, 2), kind = "latent")))
   b <- list(et_conjugate_initial_state("nu", at = c(1, 2), states = c("S", "I"), n = 2),
             et_conjugate_test_sensitivity("theta", y = "y", infected_state = "I"))
   s <- et_julia_source(m, b)$src
@@ -267,8 +267,8 @@ test_that("a conjugate-owned parameter gets a placeholder distribution", {
 test_that("a vector or scalar latent parameter is refused with a useful message", {
   d <- toy_data()
   m <- et_model(data = d, parameters = list(
-    alpha = et_par(et_gamma(1, 1), init = 0.05),
-    nu = et_par(init = c(0.1, 0.2), n = 2, kind = "latent")))
+    alpha = prior(gamma_dist(1, 1), init = 0.05),
+    nu = prior(init = c(0.1, 0.2), n = 2, kind = "latent")))
   expect_error(et_julia_source(m, list(
     et_conjugate("nu", "beta", c(1, 1), function(X, data, k) c(1, 1), n = 2))),
     "matrix-valued")

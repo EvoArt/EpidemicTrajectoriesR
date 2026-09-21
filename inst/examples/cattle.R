@@ -145,12 +145,12 @@ dat <- et_data(
 mod <- et_model(
   data = dat,
   parameters = list(
-    alpha   = et_par(et_gamma(1, 1), init = 0.05),
-    beta    = et_par(et_gamma(1, 1), init = 0.05),
-    m_tilde = et_par(et_gamma(2, 4), init = 4.0),
-    nu      = et_par(et_beta(1, 1),  init = 0.10),
-    theta_r = et_par(et_beta(1, 1),  init = 0.70),
-    theta_f = et_par(et_beta(1, 1),  init = 0.40)),
+    alpha   = prior(gamma_dist(1, 1), init = 0.05),
+    beta    = prior(gamma_dist(1, 1), init = 0.05),
+    m_tilde = prior(gamma_dist(2, 4), init = 4.0),
+    nu      = prior(beta_dist(1, 1),  init = 0.10),
+    theta_r = prior(beta_dist(1, 1),  init = 0.70),
+    theta_f = prior(beta_dist(1, 1),  init = 0.40)),
   # m = m_tilde + 1 keeps 1/m < 1, so the recovery probability can never leave
   # (0, 1) and send the sampler into a DomainError.
   derived = list(m = quote(m_tilde + 1)))

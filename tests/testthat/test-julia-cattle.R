@@ -116,11 +116,11 @@ test_that("a fit with no blocks at all still works", {
   skip_without_julia()
   d <- toy_data()
   m <- et_model(data = d, parameters = list(
-    alpha = et_par(et_gamma(1, 1), init = 0.05),
-    beta  = et_par(et_gamma(1, 1), init = 0.05),
-    m     = et_par(et_gamma(2, 4), init = 5.0),
-    nu    = et_par(et_beta(1, 1), init = 0.1),
-    theta = et_par(et_beta(1, 1), init = 0.5)))
+    alpha = prior(gamma_dist(1, 1), init = 0.05),
+    beta  = prior(gamma_dist(1, 1), init = 0.05),
+    m     = prior(gamma_dist(2, 4), init = 5.0),
+    nu    = prior(beta_dist(1, 1), init = 0.1),
+    theta = prior(beta_dist(1, 1), init = 0.5)))
   fit <- et_sample(m, n_sweeps = 10, n_adapts = 5, seed = 5, quiet = TRUE)
   expect_length(fit$draws$alpha, 10L)
   kinds <- vapply(fit$blocks, function(b) b$kind, character(1))

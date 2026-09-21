@@ -91,11 +91,11 @@ toy_model <- function() {
   et_model(
     data = toy_data(),
     parameters = list(
-      alpha   = et_par(et_gamma(1, 1), init = 0.05),
-      beta    = et_par(et_gamma(1, 1), init = 0.05),
-      m_tilde = et_par(et_gamma(2, 4), init = 4.0),
-      nu      = et_par(et_beta(1, 1), init = 0.1),
-      theta   = et_par(et_beta(1, 1), init = 0.6)),
+      alpha   = prior(gamma_dist(1, 1), init = 0.05),
+      beta    = prior(gamma_dist(1, 1), init = 0.05),
+      m_tilde = prior(gamma_dist(2, 4), init = 4.0),
+      nu      = prior(beta_dist(1, 1), init = 0.1),
+      theta   = prior(beta_dist(1, 1), init = 0.6)),
     derived = list(m = quote(m_tilde + 1)))
 }
 
