@@ -1,41 +1,48 @@
 # Parameters, priors, deterministics, and the two likelihood terms.
 
-#' Declare one model parameter.
+#' Declare a model parameter and its prior.
 #'
-#' @param prior A prior from [et_priors]. Omit only for `kind = "latent"`.
+#' @param dist The prior distribution: [beta_dist()], [gamma_dist()] and
+#'   friends, or [custom_dist()] for anything else. Omit only for
+#'   `kind = "latent"`.
 #' @param init Initial value. Length must match `n` (or `prod(dim)`).
 #' @param n Length of a vector parameter; `1` for a scalar. A vector parameter is
-#'   emitted as `PracticalBayes.filldist(prior, n)`.
+#'   emitted as `PracticalBayes.filldist(dist, n)`.
 #' @param dim Dimensions of a matrix-valued parameter (`kind = "latent"` only).
 #' @param kind `"sampled"` (the default) for a parameter with a prior, or
 #'   `"latent"` for one **owned by a conjugate kernel**: emitted as a
 #'   placeholder distribution whose density is constant, exactly as the badger
 #'   model's `nu` is.
-#' @return An object of class `et_par`.
+#' @return An object of class `prior`.
 #' @export
-et_par <- function(prior = NULL, init, n = 1L, dim = NULL,
-                   kind = c("sampled", "latent")) {
+#' @examples
+#' parameters <- list(
+#'   alpha = prior(gamma_dist(2, 0.005), init = 0.005),
+#'   p     = prior(beta_dist(2, 2),      init = 0.6))
+prior <- function(dist = NULL, init, n = 1L, dim = NULL,
+                  kind = c("sampled", "latent")) {
   kind <- match.arg(kind)
-  if (kind == "sampled" && !inherits(prior, "et_dist")) {
-    stop("et_par(): a sampled parameter needs a `prior` from et_normal(), ",
-         "et_gamma(), ... (or et_dist() for anything else).", call. = FALSE)
+  if (kind == "sampled" && !inherits(dist, "custom_dist")) {
+    stop("prior(): a sampled parameter needs a distribution from ",
+         "normal_dist(), gamma_dist(), beta_dist(), ... (or custom_dist() ",
+         "for anything else).", call. = FALSE)
   }
   if (kind == "latent" && is.null(dim)) dim <- length(init)
   init <- as.numeric(init)
   expected <- if (!is.null(dim)) prod(dim) else n
   if (length(init) != expected) {
-    stop("et_par(): `init` has length ", length(init), " but the parameter has ",
+    stop("prior(): `init` has length ", length(init), " but the parameter has ",
          expected, " element(s). A wrong length here becomes a wrong Julia ",
          "indexing convention later, so it is checked now.", call. = FALSE)
   }
-  structure(list(prior = prior, init = init, n = as.integer(n),
+  structure(list(prior = dist, init = init, n = as.integer(n),
                  dim = if (is.null(dim)) NULL else as.integer(dim),
-                 kind = kind), class = "et_par")
+                 kind = kind), class = "prior")
 }
 
 #' @export
-print.et_par <- function(x, ...) {
-  cat("<et_par> ", x$kind,
+print.prior <- function(x, ...) {
+  cat("<prior> ", x$kind,
       if (!is.null(x$prior)) paste0(" ~ ", dist_to_julia(x$prior)) else "",
       "  init=[", paste(signif(x$init, 4), collapse = ", "), "]\n", sep = "")
   invisible(x)
@@ -44,7 +51,7 @@ print.et_par <- function(x, ...) {
 #' Assemble the full model: data, parameters, priors and deterministics.
 #'
 #' @param data An [et_data()] object.
-#' @param parameters Named list of [et_par()] declarations.
+#' @param parameters Named list of [prior()] declarations.
 #' @param derived Named list of `quote()`d expressions over other parameter
 #'   names, PracticalBayes deterministics (`:=`). E.g.
 #'   `list(m = quote(m_tilde + 1))`.
@@ -61,13 +68,13 @@ et_model <- function(data, parameters, derived = list(), entry_time = NULL) {
     stop("et_model(): `data` must come from et_data().", call. = FALSE)
   }
   if (!is.list(parameters) || !length(parameters) || is.null(names(parameters))) {
-    stop("et_model(): `parameters` must be a non-empty NAMED list of et_par().",
+    stop("et_model(): `parameters` must be a non-empty NAMED list of prior().",
          call. = FALSE)
   }
   check_julia_name(names(parameters), "parameter name")
   for (nm in names(parameters)) {
-    if (!inherits(parameters[[nm]], "et_par")) {
-      stop("et_model(): parameter '", nm, "' must be created with et_par().",
+    if (!inherits(parameters[[nm]], "prior")) {
+      stop("et_model(): parameter '", nm, "' must be created with prior().",
            call. = FALSE)
     }
   }
@@ -175,4 +182,11 @@ expand_to_sampled <- function(names_in, model) {
     # contributes no dependency.
   }
   unique(out)
+}
+
+#' @rdname prior
+#' @export
+et_par <- function(...) {
+  warning("et_par() is deprecated; use prior()", call. = FALSE)
+  prior(...)
 }

@@ -368,23 +368,23 @@ dat <- et_data(
 mod <- et_model(
   data = dat,
   parameters = list(
-    tau    = et_par(et_exponential(1 / 100), init = 5.0),
-    alpha  = et_par(et_exponential(1), init = rep(0.5, raw$n_groups),
+    tau    = prior(exponential_dist(1 / 100), init = 5.0),
+    alpha  = prior(exponential_dist(1), init = rep(0.5, raw$n_groups),
                     n = raw$n_groups),
-    lambda = et_par(et_exponential(1), init = 0.5),
-    beta   = et_par(et_exponential(1), init = 0.3),
-    q      = et_par(et_beta(1, 1), init = 0.2),
-    c1     = et_par(et_exponential(1), init = 0.45),
-    a2     = et_par(et_exponential(1), init = 0.05),
-    b2     = et_par(et_exponential(1), init = 0.3),
-    thetas = et_par(et_beta(1, 1), init = rep(0.3, raw$n_tests), n = raw$n_tests),
-    rhos   = et_par(et_beta(1, 1), init = rep(0.5, raw$n_tests), n = raw$n_tests),
-    phis   = et_par(et_beta(1, 1), init = rep(0.5, raw$n_tests), n = raw$n_tests),
-    etas   = et_par(et_beta(1, 1), init = rep(0.3, raw$n_seasons),
+    lambda = prior(exponential_dist(1), init = 0.5),
+    beta   = prior(exponential_dist(1), init = 0.3),
+    q      = prior(beta_dist(1, 1), init = 0.2),
+    c1     = prior(exponential_dist(1), init = 0.45),
+    a2     = prior(exponential_dist(1), init = 0.05),
+    b2     = prior(exponential_dist(1), init = 0.3),
+    thetas = prior(beta_dist(1, 1), init = rep(0.3, raw$n_tests), n = raw$n_tests),
+    rhos   = prior(beta_dist(1, 1), init = rep(0.5, raw$n_tests), n = raw$n_tests),
+    phis   = prior(beta_dist(1, 1), init = rep(0.5, raw$n_tests), n = raw$n_tests),
+    etas   = prior(beta_dist(1, 1), init = rep(0.3, raw$n_seasons),
                     n = raw$n_seasons),
     # Owned by the conjugate Dirichlet kernel: a placeholder density, a real
     # kernel. Declared "latent" so nothing tries to sample it from a prior.
-    nu     = et_par(init = rep(0.05, raw$n_nu_times * 2),
+    nu     = prior(init = rep(0.05, raw$n_nu_times * 2),
                     dim = c(raw$n_nu_times, 2), kind = "latent")),
   # Entry gate: a badger is known alive at first capture, but its disease
   # dynamics before then were not watched. ET scores the disease transitions

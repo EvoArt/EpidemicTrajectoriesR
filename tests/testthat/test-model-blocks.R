@@ -3,57 +3,57 @@
 # ---- priors ------------------------------------------------------------------
 
 test_that("priors render as Distributions.jl constructors", {
-  expect_equal(EpidemicTrajectoriesR:::dist_to_julia(et_normal(0, 1)),
+  expect_equal(EpidemicTrajectoriesR:::dist_to_julia(normal_dist(0, 1)),
                "Normal(0.0, 1.0)")
-  expect_equal(EpidemicTrajectoriesR:::dist_to_julia(et_gamma(2, 4)),
+  expect_equal(EpidemicTrajectoriesR:::dist_to_julia(gamma_dist(2, 4)),
                "Gamma(2.0, 4.0)")
-  expect_equal(EpidemicTrajectoriesR:::dist_to_julia(et_beta(1, 1)),
+  expect_equal(EpidemicTrajectoriesR:::dist_to_julia(beta_dist(1, 1)),
                "Beta(1.0, 1.0)")
-  expect_equal(EpidemicTrajectoriesR:::dist_to_julia(et_uniform(0, 2)),
+  expect_equal(EpidemicTrajectoriesR:::dist_to_julia(uniform_dist(0, 2)),
                "Uniform(0.0, 2.0)")
-  expect_equal(EpidemicTrajectoriesR:::dist_to_julia(et_dirichlet(c(1, 1, 1))),
+  expect_equal(EpidemicTrajectoriesR:::dist_to_julia(dirichlet_dist(c(1, 1, 1))),
                "Dirichlet(Float64[1.0, 1.0, 1.0])")
 })
 
-test_that("et_exponential takes a RATE and emits Julia's SCALE", {
+test_that("exponential_dist takes a RATE and emits Julia's SCALE", {
   # Julia's Exponential is parameterised by scale; R users overwhelmingly think
   # in rates. Getting this backwards would be a silent 1/x prior error, so the
   # conversion is explicit and tested.
-  expect_equal(EpidemicTrajectoriesR:::dist_to_julia(et_exponential(1)),
+  expect_equal(EpidemicTrajectoriesR:::dist_to_julia(exponential_dist(1)),
                "Exponential(1.0)")
-  expect_equal(EpidemicTrajectoriesR:::dist_to_julia(et_exponential(1 / 100)),
+  expect_equal(EpidemicTrajectoriesR:::dist_to_julia(exponential_dist(1 / 100)),
                "Exponential(100.0)")
-  expect_error(et_exponential(0), "positive")
-  expect_error(et_exponential(-1), "positive")
+  expect_error(exponential_dist(0), "positive")
+  expect_error(exponential_dist(-1), "positive")
 })
 
 test_that("truncation nests", {
   expect_equal(
-    EpidemicTrajectoriesR:::dist_to_julia(et_truncated(et_normal(0, 1), lower = 0)),
+    EpidemicTrajectoriesR:::dist_to_julia(truncated_dist(normal_dist(0, 1), lower = 0)),
     "truncated(Normal(0.0, 1.0), 0.0, Inf)")
   expect_equal(
-    EpidemicTrajectoriesR:::dist_to_julia(et_truncated(et_normal(0, 1), 0, 5)),
+    EpidemicTrajectoriesR:::dist_to_julia(truncated_dist(normal_dist(0, 1), 0, 5)),
     "truncated(Normal(0.0, 1.0), 0.0, 5.0)")
 })
 
-test_that("et_dist is the escape hatch and validates its name", {
-  expect_equal(EpidemicTrajectoriesR:::dist_to_julia(et_dist("Weibull", list(2, 3))),
+test_that("custom_dist is the escape hatch and validates its name", {
+  expect_equal(EpidemicTrajectoriesR:::dist_to_julia(custom_dist("Weibull", list(2, 3))),
                "Weibull(2.0, 3.0)")
-  expect_error(et_dist("not a name"), "identifier")
+  expect_error(custom_dist("not a name"), "identifier")
 })
 
 # ---- parameters --------------------------------------------------------------
 
-test_that("et_par checks init against the declared shape", {
-  expect_error(et_par(et_beta(1, 1), init = c(0.1, 0.2), n = 1), "length 2")
-  expect_error(et_par(et_beta(1, 1), init = 0.1, n = 3), "length 1")
-  expect_error(et_par(init = rep(0.1, 5), dim = c(2, 2), kind = "latent"),
+test_that("prior checks init against the declared shape", {
+  expect_error(prior(beta_dist(1, 1), init = c(0.1, 0.2), n = 1), "length 2")
+  expect_error(prior(beta_dist(1, 1), init = 0.1, n = 3), "length 1")
+  expect_error(prior(init = rep(0.1, 5), dim = c(2, 2), kind = "latent"),
                "length 5")
-  expect_s3_class(et_par(et_beta(1, 1), init = rep(0.1, 3), n = 3), "et_par")
+  expect_s3_class(prior(beta_dist(1, 1), init = rep(0.1, 3), n = 3), "prior")
 })
 
 test_that("a sampled parameter needs a prior", {
-  expect_error(et_par(init = 1), "needs a `prior`")
+  expect_error(prior(init = 1), "needs a distribution")
 })
 
 # ---- model -------------------------------------------------------------------
@@ -61,20 +61,20 @@ test_that("a sampled parameter needs a prior", {
 test_that("the model validates names and derived expressions", {
   d <- toy_data()
   mk <- function(...) et_model(data = d, ...)
-  expect_error(mk(parameters = list(alpha = et_par(et_beta(1, 1), init = 0.1)),
+  expect_error(mk(parameters = list(alpha = prior(beta_dist(1, 1), init = 0.1)),
                   derived = list(m = quote(nonexistent + 1))),
                "unknown name")
-  expect_error(mk(parameters = list(X = et_par(et_beta(1, 1), init = 0.1))),
+  expect_error(mk(parameters = list(X = prior(beta_dist(1, 1), init = 0.1))),
                "reserved")
-  expect_error(mk(parameters = list(a = et_par(et_beta(1, 1), init = 0.1)),
+  expect_error(mk(parameters = list(a = prior(beta_dist(1, 1), init = 0.1)),
                   derived = list(a = quote(a + 1))),
                "clash")
-  expect_error(mk(parameters = list(a = 1)), "et_par")
+  expect_error(mk(parameters = list(a = 1)), "prior")
 })
 
 test_that("entry_time requires a survival declaration", {
   expect_error(et_model(data = toy_data(),
-                        parameters = list(a = et_par(et_beta(1, 1), init = 0.1)),
+                        parameters = list(a = prior(beta_dist(1, 1), init = 0.1)),
                         entry_time = rep(1L, TOY_N)),
                "requires the transitions to declare an et_survival")
 })
@@ -144,8 +144,8 @@ test_that("a conjugate-owned parameter with no kernel is refused", {
   # ever inform it -- a silent modelling failure rather than an error.
   d <- toy_data()
   m <- et_model(data = d, parameters = list(
-    alpha = et_par(et_gamma(1, 1), init = 0.05),
-    nu = et_par(init = rep(0.05, 4), dim = c(2, 2), kind = "latent")))
+    alpha = prior(gamma_dist(1, 1), init = 0.05),
+    nu = prior(init = rep(0.05, 4), dim = c(2, 2), kind = "latent")))
   expect_error(EpidemicTrajectoriesR:::resolve_blocks(m, list()),
                "no conjugate kernel")
 })
@@ -159,8 +159,8 @@ test_that("a non-block in `blocks` is refused", {
 test_that("HMC step sizes expand per parameter, in declaration order", {
   d <- toy_data()
   m <- et_model(data = d, parameters = list(
-    a = et_par(et_beta(1, 1), init = 0.1),
-    v = et_par(et_beta(1, 1), init = rep(0.1, 3), n = 3)))
+    a = prior(beta_dist(1, 1), init = 0.1),
+    v = prior(beta_dist(1, 1), init = rep(0.1, 3), n = 3)))
   b <- et_hmc(c("a", "v"), n_steps = 5, step_size = list(a = 0.01, v = 0.2))
   expect_equal(EpidemicTrajectoriesR:::expand_step_size(m, b),
                c(0.01, 0.2, 0.2, 0.2))

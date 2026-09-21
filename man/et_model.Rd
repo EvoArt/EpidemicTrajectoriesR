@@ -9,7 +9,7 @@ et_model(data, parameters, derived = list(), entry_time = NULL)
 \arguments{
 \item{data}{An \code{\link[=et_data]{et_data()}} object.}
 
-\item{parameters}{Named list of \code{\link[=et_par]{et_par()}} declarations.}
+\item{parameters}{Named list of \code{\link[=prior]{prior()}} declarations.}
 
 \item{derived}{Named list of \code{quote()}d expressions over other parameter
 names, PracticalBayes deterministics (\verb{:=}). E.g.

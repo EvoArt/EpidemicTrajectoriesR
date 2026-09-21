@@ -152,8 +152,8 @@ test_that("codegen uses the verbose fallback when any array is hand-written", {
       observation_weight = function(model, data, X, i, t, s) 1,
       extras = list(g = matrix(1L, 3, 5)))
     et_model(data = d, parameters = list(
-      alpha = et_par(et_beta(1, 1), init = 0.1),
-      gamma = et_par(et_beta(1, 1), init = 0.2)))
+      alpha = prior(beta_dist(1, 1), init = 0.1),
+      gamma = prior(beta_dist(1, 1), init = 0.2)))
   }
   src <- et_julia_source(toy(mixed_aggs()))$src
   # A plain NamedTuple of arrays, not the macro.

@@ -238,30 +238,30 @@ dat <- et_data(
 ## ---------------------------------------------------------------------------
 ## 7. Parameters and priors
 ## ---------------------------------------------------------------------------
-# et_exponential() takes a RATE; Julia's Exponential is parameterised by scale,
+# exponential_dist() takes a RATE; Julia's Exponential is parameterised by scale,
 # and the package converts. `nu` is owned by a conjugate kernel, so it is
 # declared "latent": a placeholder density, a real draw from the kernel.
 
 mod <- et_model(
   data = dat,
   parameters = list(
-    tau    = et_par(et_exponential(1 / 100), init = 5.0),
-    alpha  = et_par(et_exponential(1), init = rep(0.5, raw$n_groups),
+    tau    = prior(exponential_dist(1 / 100), init = 5.0),
+    alpha  = prior(exponential_dist(1), init = rep(0.5, raw$n_groups),
                     n = raw$n_groups),
-    lambda = et_par(et_exponential(1), init = 0.5),
-    beta   = et_par(et_exponential(1), init = 0.3),
-    q      = et_par(et_beta(1, 1), init = 0.2),
+    lambda = prior(exponential_dist(1), init = 0.5),
+    beta   = prior(exponential_dist(1), init = 0.3),
+    q      = prior(beta_dist(1, 1), init = 0.2),
 
-    c1 = et_par(et_exponential(1), init = 0.45),   # Makeham constant
-    a2 = et_par(et_exponential(1), init = 0.05),   # Gompertz scale
-    b2 = et_par(et_exponential(1), init = 0.3),    # Gompertz rate
+    c1 = prior(exponential_dist(1), init = 0.45),   # Makeham constant
+    a2 = prior(exponential_dist(1), init = 0.05),   # Gompertz scale
+    b2 = prior(exponential_dist(1), init = 0.3),    # Gompertz rate
 
-    thetas = et_par(et_beta(1, 1), init = rep(0.3, raw$n_tests), n = raw$n_tests),
-    rhos   = et_par(et_beta(1, 1), init = rep(0.5, raw$n_tests), n = raw$n_tests),
-    phis   = et_par(et_beta(1, 1), init = rep(0.5, raw$n_tests), n = raw$n_tests),
-    etas   = et_par(et_beta(1, 1), init = rep(0.3, raw$n_seasons),
+    thetas = prior(beta_dist(1, 1), init = rep(0.3, raw$n_tests), n = raw$n_tests),
+    rhos   = prior(beta_dist(1, 1), init = rep(0.5, raw$n_tests), n = raw$n_tests),
+    phis   = prior(beta_dist(1, 1), init = rep(0.5, raw$n_tests), n = raw$n_tests),
+    etas   = prior(beta_dist(1, 1), init = rep(0.3, raw$n_seasons),
                     n = raw$n_seasons),
-    nu     = et_par(init = rep(0.05, raw$n_nu_times * 2),
+    nu     = prior(init = rep(0.05, raw$n_nu_times * 2),
                     dim = c(raw$n_nu_times, 2), kind = "latent")),
   # Entry gate: a badger is known alive at first capture, but its disease
   # dynamics before then were not watched. The likelihood scores the disease

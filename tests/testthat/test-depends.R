@@ -78,7 +78,7 @@ test_that("a coupling-only rate does NOT enter depends", {
     group = rep(seq_len(TOY_PENS), each = TOY_PER_PEN),
     observation_weight = toy_obs, extras = list(y = toy_y()))
   m <- et_model(data = d, parameters = c(
-    toy_model()$parameters, list(kappa = et_par(et_beta(1, 1), init = 0.5))),
+    toy_model()$parameters, list(kappa = prior(beta_dist(1, 1), init = 0.5))),
     derived = list(m = quote(m_tilde + 1)))
   g <- et_julia_source(m)
   expect_false("kappa" %in% g$depends$epidemic)
@@ -102,7 +102,7 @@ test_that("aggregate updates that read parameters are attributed to the epidemic
     group = rep(seq_len(TOY_PENS), each = TOY_PER_PEN),
     observation_weight = toy_obs, extras = list(y = toy_y()))
   m <- et_model(data = d, parameters = c(
-    toy_model()$parameters, list(weight = et_par(et_beta(1, 1), init = 0.5))),
+    toy_model()$parameters, list(weight = prior(beta_dist(1, 1), init = 0.5))),
     derived = list(m = quote(m_tilde + 1)))
   expect_true("weight" %in% et_julia_source(m)$depends$epidemic)
 })
