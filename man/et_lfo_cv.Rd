@@ -17,6 +17,7 @@ et_lfo_cv(
   n_adapts = 0,
   adtype = "forwarddiff",
   cache = NULL,
+  x_init = NULL,
   quiet = FALSE
 )
 }
@@ -42,6 +43,17 @@ for \code{\link[=et_sample]{et_sample()}}.}
 \item{cache}{Optional directory to cache each cutoff's fit. Keyed on the
 cutoff only (not on granularity/scorer), so adding a scoring arm later
 costs seconds, not a re-run of every fit.}
+
+\item{x_init}{Optional \verb{n_timepoints x n_individuals} integer matrix of state
+codes to start each cutoff's chain from. The default, all-susceptible, is a
+poor start for a transmission model: iFFBS resamples one individual at a
+time, so with nobody infected the only route in is the background hazard,
+and a small one leaves the chain effectively stuck. The transmission term
+is then multiplied by a zero infected count throughout, so its rate is
+unidentified — and two models differing only in that term fit identically,
+which looks like a working comparison that resolves nothing. Truncation
+keeps the full time dimension, so one matrix is the right shape at every
+cutoff.}
 
 \item{quiet}{Suppress progress messages.}
 }

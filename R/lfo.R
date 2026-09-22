@@ -437,13 +437,24 @@ lfo_spec_src <- function(spec, plan_expr) {
 #' @param cache Optional directory to cache each cutoff's fit. Keyed on the
 #'   cutoff only (not on granularity/scorer), so adding a scoring arm later
 #'   costs seconds, not a re-run of every fit.
+#' @param x_init Optional `n_timepoints x n_individuals` integer matrix of state
+#'   codes to start each cutoff's chain from. The default, all-susceptible, is a
+#'   poor start for a transmission model: iFFBS resamples one individual at a
+#'   time, so with nobody infected the only route in is the background hazard,
+#'   and a small one leaves the chain effectively stuck. The transmission term
+#'   is then multiplied by a zero infected count throughout, so its rate is
+#'   unidentified — and two models differing only in that term fit identically,
+#'   which looks like a working comparison that resolves nothing. Truncation
+#'   keeps the full time dimension, so one matrix is the right shape at every
+#'   cutoff.
 #' @param quiet Suppress progress messages.
 #' @return An object of class `et_lfo_result`. `$granularities` names what was
 #'   scored; use [et_lfo_elpd()] and [et_lfo_compare()] to read it.
 #' @export
 et_lfo_cv <- function(model, spec, L, M, granularity = "pointwise", stride = 1L,
                       blocks = list(), n_sweeps = 1000, n_burn = 0, n_adapts = 0,
-                      adtype = "forwarddiff", cache = NULL, quiet = FALSE) {
+                      adtype = "forwarddiff", cache = NULL, x_init = NULL,
+                      quiet = FALSE) {
   et_require_session()
   if (!inherits(model, "et_model")) {
     stop("et_lfo_cv(): `model` must come from et_model().", call. = FALSE)
@@ -463,6 +474,17 @@ et_lfo_cv <- function(model, spec, L, M, granularity = "pointwise", stride = 1L,
   JuliaCall::julia_command(sprintf(
     "Base.include_string(%s, \"using EpidemicTrajectories: truncation, LFOSpec, lfo_cv, Pointwise, Joint, ByGroup, survival_constrained\")",
     mod))
+
+  # Truncation keeps the full time dimension (it clamps sampling periods
+  # instead), so one full-size matrix is the right shape at every cutoff.
+  x_sym <- "nothing"
+  if (!is.null(x_init)) {
+    x_init <- as.matrix(x_init); storage.mode(x_init) <- "integer"
+    check_x_init(x_init, model, "et_lfo_cv()")
+    x_sym <- paste0("Main.", mod, "_lfo_xinit")
+    JuliaCall::julia_assign(paste0(mod, "_lfo_xinit"), x_init)
+    x_sym <- sprintf("Matrix{Int}(%s)", x_sym)
+  }
 
   et_lfo_inject(mod, model)   # idempotent: defines et_lfo_fit/et_lfo_cv once
 
@@ -525,14 +547,15 @@ et_lfo_cv <- function(model, spec, L, M, granularity = "pointwise", stride = 1L,
     "    plan = %s\n",
     "%s\n",
     "    et_lfo_cv(spec; L=%s, M=%s, granularity=(%s,), stride=%s, cache=%s,\n",
-    "              verbose=%s, n_sweeps=%s, n_burn=%s, n_adapts=%s, adtype=%s)\n",
+    "              verbose=%s, n_sweeps=%s, n_burn=%s, n_adapts=%s, adtype=%s,\n",
+    "              x_init=%s)\n",
     "end"),
     truncation_src(spec$truncation),
     indent(lfo_spec_src(spec, plan_expr = "plan")),
     julia_int(L), julia_int(M), gran_src, julia_int(stride), cache_src,
     if (quiet) "false" else "true",
     julia_int(n_sweeps), julia_int(n_burn), julia_int(n_adapts),
-    adtype_to_julia(adtype))
+    adtype_to_julia(adtype), x_sym)
 
   # The result stays in Julia, under a name of its own, not round-tripped
   # through R, which has no faithful representation of an LFOResult (a Dict of
@@ -572,8 +595,18 @@ lfo_inject_src <- function(model) {
   paste0(
     "if !isdefined(@__MODULE__, :et_lfo_fit)\n",
     "function et_lfo_fit(data; n_sweeps, n_burn=0, n_adapts=0, seed=1,\n",
-    "                     adtype=ADTypes.AutoForwardDiff())\n",
-    "    X0 = fill(1, data.n_timepoints, data.n_individuals)\n",
+    "                     adtype=ADTypes.AutoForwardDiff(), x_init=nothing)\n",
+    "    # All-susceptible is a poor start for a model whose infection route is\n",
+    "    # transmission. iFFBS resamples one individual at a time, so with nobody\n",
+    "    # infected the only way in is the background hazard, and a small one\n",
+    "    # leaves the chain effectively stuck. Worse, the transmission term is\n",
+    "    # multiplied by a zero infected count throughout, so its rate is\n",
+    "    # unidentified and two models differing only in that term fit\n",
+    "    # identically. Pass `x_init` when a better configuration is available;\n",
+    "    # truncation keeps the full time dimension, so one matrix is the right\n",
+    "    # shape at every cutoff.\n",
+    "    X0 = x_init === nothing ? fill(1, data.n_timepoints, data.n_individuals) :\n",
+    "         Matrix{Int}(x_init)\n",
     "    reset_aggregates!(data)\n",
     "    apply_derived_summaries!(et_params(INIT_PARS), data, X0)\n",
     "    m = et_the_model(data, LOGLIK", if (has_obs) ", OBSLOGLIK" else "", ")\n",
@@ -601,9 +634,11 @@ lfo_inject_src <- function(model) {
     "# `data` truncated per cutoff, model refit fresh each time -- see truncate.jl\n",
     "# for why shortening n_timepoints alone is not enough.\n",
     "function et_lfo_cv(spec; L, M, granularity, stride=1, cache=nothing,\n",
-    "                    verbose=true, n_sweeps, n_burn=0, n_adapts=0, adtype)\n",
+    "                    verbose=true, n_sweeps, n_burn=0, n_adapts=0, adtype,\n",
+    "                    x_init=nothing)\n",
     "    fitfn = (train, t) -> et_lfo_fit(train; n_sweeps=n_sweeps, n_burn=n_burn,\n",
-    "                                      n_adapts=n_adapts, seed=1000 + t, adtype=adtype)\n",
+    "                                      n_adapts=n_adapts, seed=1000 + t, adtype=adtype,\n",
+    "                                      x_init=x_init)\n",
     "    spec2 = LFOSpec(fit=fitfn, cell_logdensity=spec.cell_logdensity,\n",
     "                    plan=spec.plan, is_informative=spec.is_informative,\n",
     "                    constrain=spec.constrain, survival_weight=spec.survival_weight,\n",

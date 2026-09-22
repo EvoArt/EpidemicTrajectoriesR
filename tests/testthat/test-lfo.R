@@ -232,3 +232,17 @@ test_that("et_lfo_diagnostics() refuses a missing or empty cache", {
   d <- tempfile(); dir.create(d)
   expect_error(et_lfo_diagnostics(d), "no fit_t", fixed = TRUE)
 })
+
+test_that("the injected fit takes x_init and defaults to all-susceptible", {
+  src <- inject_src(toy_model())
+  # The default must stay all-susceptible: existing callers rely on it.
+  expect_match(src, "x_init === nothing ? fill(1,", fixed = TRUE)
+  # ... but it must be overridable, or a transmission model's rate parameter is
+  # unidentified (n_infected stays 0) and two models differing only in that
+  # term fit identically.
+  expect_match(src, "x_init=nothing", fixed = TRUE)
+  expect_match(src, "Matrix{Int}(x_init)", fixed = TRUE)
+  # and et_lfo_cv must forward it rather than swallow it
+  expect_match(src, "x_init=x_init", fixed = TRUE)
+  expect_true(julia_parses(src))
+})
