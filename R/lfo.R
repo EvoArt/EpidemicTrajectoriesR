@@ -702,3 +702,82 @@ print.et_lfo_result <- function(x, ...) {
   }
   invisible(x)
 }
+
+#' Convergence diagnostics for a leave-future-out sweep's fits.
+#'
+#' One row per cutoff and parameter: effective sample size, its Monte Carlo
+#' standard error, and rhat.
+#'
+#' **ESS is the number to read here, and rhat is the weaker of the two.** A
+#' sweep fits one chain per cutoff, so there is no between-chain rhat; what is
+#' reported is computed over the split halves of that single chain, which
+#' catches a drifting chain but not one stuck in a single mode. ESS also
+#' answers the question the caller actually has -- whether enough draws were
+#' retained -- and it is sensitive to the autocorrelation a Gibbs sweep over a
+#' latent state produces.
+#'
+#' Read the WORST cell rather than an average. One badly mixed parameter at one
+#' cutoff invalidates that window's score, and a mean over cutoffs hides
+#' exactly that.
+#'
+#' The draws are read from the fits `et_lfo_cv()` cached, not from its result:
+#' a scored window keeps its scores and releases the parameter draws. So this
+#' needs `cache=` to have been set, and to be called before that directory is
+#' cleaned up.
+#'
+#' @param cache The cache directory given to [et_lfo_cv()].
+#' @return A data frame: `cutoff`, `parameter`, `ess`, `mcse`, `rhat`,
+#'   `n_draws`, ordered worst ESS first.
+#' @export
+et_lfo_diagnostics <- function(cache) {
+  et_require_session()
+  if (!dir.exists(cache)) {
+    stop("et_lfo_diagnostics(): no such cache directory: ", cache, call. = FALSE)
+  }
+  files <- sort(list.files(cache, pattern = "^fit_t[0-9]+[.]jls$",
+                           full.names = TRUE))
+  if (!length(files)) {
+    stop("et_lfo_diagnostics(): no fit_t*.jls in ", cache,
+         " -- was et_lfo_cv() given cache=, and the directory kept?",
+         call. = FALSE)
+  }
+  out <- do.call(rbind, lapply(files, function(f) {
+    src <- sprintf(lfo_diagnostics_src(),
+                   julia_string(julia_path(normalizePath(f, mustWork = TRUE))))
+    d <- as.data.frame(JuliaCall::julia_eval(src), stringsAsFactors = FALSE)
+    if (!nrow(d)) return(NULL)
+    cbind(cutoff = as.integer(sub("^.*fit_t0*([0-9]+)[.]jls$", "\1", f)), d,
+          stringsAsFactors = FALSE)
+  }))
+  out[order(out$ess), ]
+}
+
+# The Julia half, as a pure function of nothing so it can be parse-checked
+# without a session. `%s` is the cache file path.
+#
+# FlexiChains is reached THROUGH PracticalBayes rather than imported. It is
+# PracticalBayes's dependency, not this project's, so `import FlexiChains`
+# fails with "not found in current path" even though the package is resolved
+# and already loaded -- and adding a direct dependency for four functions would
+# be a heavier change than asking the module that owns it.
+#
+# ess/rhat/mcse each return a FlexiSummary wrapping a 3-D array, hence `only`.
+lfo_diagnostics_src <- function() paste0(
+  "let FC = @eval(PracticalBayes, FlexiChains)\n",
+  "    draws, _ = open(deserialize, %s)\n",
+  "    S = length(draws)\n",
+  # Scalar rates only: a vector parameter would need flattening into one column
+  # per element, and nothing in these models has one.
+  "    nms = [k for (k, v) in pairs(draws[1]) if v isa Real]\n",
+  "    chain = FC.FlexiChain{Symbol}(S, 1, Dict(\n",
+  "        FC.Parameter(n) => reshape(Float64[getproperty(d, n) for d in draws], S, 1)\n",
+  "        for n in nms))\n",
+  "    e = FC.ess(chain); m = FC.mcse(chain); r = FC.rhat(chain)\n",
+  "    Dict(\n",
+  "        \"parameter\" => String.(nms),\n",
+  "        \"ess\"     => [Float64(only(e[FC.Parameter(n)])) for n in nms],\n",
+  "        \"mcse\"    => [Float64(only(m[FC.Parameter(n)])) for n in nms],\n",
+  "        \"rhat\"    => [Float64(only(r[FC.Parameter(n)])) for n in nms],\n",
+  "        \"n_draws\" => fill(S, length(nms)),\n",
+  "    )\n",
+  "end")

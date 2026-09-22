@@ -200,3 +200,35 @@ test_that("a model with no observation process omits OBSLOGLIK", {
   m$data$observation_process <- NULL
   expect_false(grepl("OBSLOGLIK", inject_src(m), fixed = TRUE))
 })
+
+diag_src <- EpidemicTrajectoriesR:::lfo_diagnostics_src
+
+test_that("the diagnostics source is valid Julia once its path is filled in", {
+  src <- sprintf(diag_src(), '"/tmp/fit_t0030.jls"')
+  expect_true(julia_parses(src))
+})
+
+test_that("the diagnostics source reaches FlexiChains through PracticalBayes", {
+  src <- diag_src()
+  # Not a bare `import FlexiChains`: it is PracticalBayes's dependency, not
+  # this project's, so importing it directly fails even though it is loaded.
+  expect_false(grepl("import FlexiChains", src, fixed = TRUE))
+  expect_match(src, "@eval(PracticalBayes, FlexiChains)", fixed = TRUE)
+})
+
+test_that("the diagnostics source unwraps FlexiSummary to a scalar", {
+  # ess/rhat/mcse each return a 3-D array per parameter; without `only` the
+  # data frame silently gets list columns.
+  src <- diag_src()
+  for (stat in c("e[FC.Parameter(n)]", "m[FC.Parameter(n)]", "r[FC.Parameter(n)]")) {
+    expect_match(src, paste0("only(", stat, ")"), fixed = TRUE)
+  }
+})
+
+test_that("et_lfo_diagnostics() refuses a missing or empty cache", {
+  # Needs a session: the function checks for one before it looks at the path.
+  skip_without_julia()
+  expect_error(et_lfo_diagnostics(tempfile()), "no such cache directory")
+  d <- tempfile(); dir.create(d)
+  expect_error(et_lfo_diagnostics(d), "no fit_t", fixed = TRUE)
+})
