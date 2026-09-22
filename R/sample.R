@@ -98,10 +98,10 @@ et_sample <- function(model, blocks = list(), n_sweeps = 1000, n_burn = 0,
                  seed = seed), class = "et_fit")
 }
 
-check_x_init <- function(x_init, model) {
+check_x_init <- function(x_init, model, caller = "et_sample()") {
   d <- model$data
   if (!identical(dim(x_init), c(d$n_timepoints, d$n_individuals))) {
-    stop("et_sample(): `x_init` must be ", d$n_timepoints, " x ",
+    stop(caller, ": `x_init` must be ", d$n_timepoints, " x ",
          d$n_individuals, " (timepoints x individuals), got ",
          paste(dim(x_init), collapse = " x "),
          ". ET indexes the trajectory X[t, i].", call. = FALSE)
@@ -109,7 +109,7 @@ check_x_init <- function(x_init, model) {
   ns <- length(d$transitions$states)
   bad <- x_init[x_init < 1 | x_init > ns]
   if (length(bad)) {
-    stop("et_sample(): `x_init` holds state code(s) outside 1..", ns, ": ",
+    stop(caller, ": `x_init` holds state code(s) outside 1..", ns, ": ",
          paste(utils::head(unique(bad), 5), collapse = ", "),
          ". Codes are 1-based positions in the state space (",
          paste(d$transitions$states, collapse = ", "), ").", call. = FALSE)
