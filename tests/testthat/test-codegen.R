@@ -89,7 +89,7 @@ test_that("both likelihood terms are emitted when there is an observation proces
   s <- src_of()
   expect_match(s, "@addlogprob! loglik_fn(pars, data, X)", fixed = TRUE)
   expect_match(s, "@addlogprob! obs_loglik_fn(pars, data, X)", fixed = TRUE)
-  expect_match(s, "const OBSLOGLIK = epidemic_obs_loglik(DATA)", fixed = TRUE)
+  expect_match(s, "et_obsloglik_for(DATA) = epidemic_obs_loglik(DATA)", fixed = TRUE)
 })
 
 test_that("a model with no observation process emits only the epidemic term", {
@@ -190,7 +190,7 @@ test_that("the entry gate is emitted only when asked for, with its survival", {
     alpha = prior(gamma_dist(1, 1), init = 0.05), beta = prior(gamma_dist(1, 1), init = 0.05),
     nu = prior(beta_dist(1, 1), init = 0.1), theta = prior(beta_dist(1, 1), init = 0.5),
     c1 = prior(exponential_dist(1), init = 0.1)))
-  expect_match(et_julia_source(m0)$src, "const LOGLIK = epidemic_loglik(DATA)",
+  expect_match(et_julia_source(m0)$src, "et_loglik_for(DATA) = epidemic_loglik(DATA)",
                fixed = TRUE)
 
   m1 <- et_model(data = d, parameters = m0$parameters, entry_time = "entry")

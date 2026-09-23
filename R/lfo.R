@@ -3,9 +3,10 @@
 #
 # et_run() closes over the module-level `const DATA`, since a normal fit only
 # sees the whole series. LFO needs the same compiled model refit against a
-# truncated copy at every cutoff, so et_lfo_run_src() emits a second entry
-# point taking `data` as an argument. Injected with Base.include_string(), so
-# it stays out of et_julia_source() and never perturbs the module-name hash.
+# truncated copy at every cutoff, so lfo_inject_src() emits a second entry
+# point taking `data` as an argument and rebuilding every data-dependent piece
+# from it. Injected with Base.include_string(), so it stays out of
+# et_julia_source() and never perturbs the module-name hash.
 
 #' Declare how each `extras` entry behaves under truncation.
 #'
@@ -577,10 +578,11 @@ et_lfo_cv <- function(model, spec, L, M, granularity = "pointwise", stride = 1L,
 }
 
 # Inject, into the loaded module, a fit function usable as `LFOSpec.fit` and a
-# thin `et_lfo_cv` wrapper that supplies it. Mirrors et_run() (codegen.R)
-# exactly: same et_prepare!, same SPL, same INIT_PARS, except it takes
-# `data` as an argument instead of closing over the module constant `DATA`,
-# which is the one thing a normal fit never needs and LFO always does.
+# thin `et_lfo_cv` wrapper that supplies it. Mirrors et_run() (codegen.R), with
+# the same INIT_PARS and the same blocks, except that it takes `data` as an
+# argument and builds the likelihoods and the sampler from it (et_loglik_for,
+# et_latent_for, et_sampler_for) instead of using the constants built from
+# `DATA`. Reusing those constants runs the latent update on the full series.
 et_lfo_inject <- function(mod, model) {
   nm <- paste0(mod, "_lfo_inject_src")
   JuliaCall::julia_assign(nm, lfo_inject_src(model))
@@ -609,7 +611,14 @@ lfo_inject_src <- function(model) {
     "         Matrix{Int}(x_init)\n",
     "    reset_aggregates!(data)\n",
     "    apply_derived_summaries!(et_params(INIT_PARS), data, X0)\n",
-    "    m = et_the_model(data, LOGLIK", if (has_obs) ", OBSLOGLIK" else "", ")\n",
+    "    # Every artefact is rebuilt from `data`, not taken from the module\n",
+    "    # constants. SPL's latent block closes over the data it was built from, so\n",
+    "    # stepping SPL here would resample all T occasions against the full\n",
+    "    # observations while the model saw only the truncated copy: a fit at\n",
+    "    # cutoff t that has seen the future.\n",
+    "    m = et_the_model(data, et_loglik_for(data)",
+    if (has_obs) ", et_obsloglik_for(data)" else "", ")\n",
+    "    spl = et_sampler_for(data, et_latent_for(data))\n",
     "    init = (; X=X0, INIT_PARS...)\n",
     "    # Stepped BY HAND, exactly as et_collect_run() is: `X` must be RETAINED\n",
     "    # here (LFO needs every draw's whole trajectory to forward-simulate from),\n",
@@ -617,16 +626,16 @@ lfo_inject_src <- function(model) {
     "    # bundled chain drops per-sweep `X` unconditionally, so the raw\n",
     "    # transitions from `step` are read directly instead.\n",
     "    rng = StableRNG(seed)\n",
-    "    t, state = AbstractMCMC.step(rng, m, SPL; init=init, adtype=adtype,\n",
+    "    t, state = AbstractMCMC.step(rng, m, spl; init=init, adtype=adtype,\n",
     "                                 n_adapts=n_adapts)\n",
     "    for _ in 1:n_burn\n",
-    "        t, state = AbstractMCMC.step(rng, m, SPL, state; n_adapts=n_adapts)\n",
+    "        t, state = AbstractMCMC.step(rng, m, spl, state; n_adapts=n_adapts)\n",
     "    end\n",
     "    draws = Vector{Any}(undef, n_sweeps)\n",
     "    Xs = Vector{Matrix{Int}}(undef, n_sweeps)\n",
     "    draws[1] = et_params(t); Xs[1] = copy(t.X)\n",
     "    for k in 2:n_sweeps\n",
-    "        t, state = AbstractMCMC.step(rng, m, SPL, state; n_adapts=n_adapts)\n",
+    "        t, state = AbstractMCMC.step(rng, m, spl, state; n_adapts=n_adapts)\n",
     "        draws[k] = et_params(t); Xs[k] = copy(t.X)\n",
     "    end\n",
     "    (draws, Xs)\n",

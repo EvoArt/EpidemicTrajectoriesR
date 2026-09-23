@@ -230,20 +230,30 @@ generate_module <- function(model, blocks, module_name) {
   data_src <- data_src_for(d, obs_process_name, obs_weight_name,
                            !is.null(coupling_names), summary_names)
 
-  loglik_src <- if (!is.null(entry_expr)) {
-    sprintf("const LOGLIK = epidemic_loglik(DATA; entry_time=%s, survival=%s)",
-            entry_expr, surv_name)
-  } else {
-    "const LOGLIK = epidemic_loglik(DATA)"
-  }
+  # Each artefact is written as a function of the data and then applied to
+  # DATA. A normal fit uses the constants. A leave-future-out refit has to
+  # rebuild every one from the truncated copy: the latent sampler closes over
+  # the data it is built from, so one built from DATA resamples all T occasions
+  # against every observation, whatever data the model itself was given.
+  loglik_src <- paste0(
+    if (!is.null(entry_expr)) {
+      sprintf("et_loglik_for(DATA) = epidemic_loglik(DATA; entry_time=%s, survival=%s)",
+              entry_expr, surv_name)
+    } else {
+      "et_loglik_for(DATA) = epidemic_loglik(DATA)"
+    },
+    "\nconst LOGLIK = et_loglik_for(DATA)")
   has_obs <- !is.null(obs_process_name) || !is.null(obs_weight_name)
-  obsll_src <- if (!has_obs) NULL
-    else if (!is.null(lik_weight_name)) sprintf(
-      "const OBSLOGLIK = epidemic_obs_loglik(DATA; observation_weight=%s)",
+  obsll_src <- if (!has_obs) NULL else paste0(
+    if (!is.null(lik_weight_name)) sprintf(
+      "et_obsloglik_for(DATA) = epidemic_obs_loglik(DATA; observation_weight=%s)",
       lik_weight_name)
-    else "const OBSLOGLIK = epidemic_obs_loglik(DATA)"
-  latent_src <- sprintf("const LATENT! = epidemic_latent_sampler(DATA%s)",
-                        if (isTRUE(traj_block(blocks)$mh)) "; mh=true" else "")
+    else "et_obsloglik_for(DATA) = epidemic_obs_loglik(DATA)",
+    "\nconst OBSLOGLIK = et_obsloglik_for(DATA)")
+  latent_src <- paste0(
+    sprintf("et_latent_for(DATA) = epidemic_latent_sampler(DATA%s)",
+            if (isTRUE(traj_block(blocks)$mh)) "; mh=true" else ""),
+    "\nconst LATENT! = et_latent_for(DATA)")
 
   # --- the PracticalBayes model ---------------------------------------------
   dep_epi <- if (epi_opaque) NULL
@@ -566,11 +576,17 @@ traj_block <- function(blocks) {
   blocks[[which(vapply(blocks, function(b) b$kind == "iffbs", logical(1)))[1]]]
 }
 
+# A function of the data and the latent sampler for the same reason as the
+# artefacts above. A block may name DATA (a conjugate count body, a capture
+# array); inside et_sampler_for() that name is the argument, so a refit on
+# truncated data gets truncated blocks without any block being rewritten.
 gibbs_src_for <- function(model, blocks) {
   entries <- vapply(blocks, function(b) block_entry(model, b), character(1))
   paste0(
     params_closure_src(model), "\n\n",
-    sprintf("const SPL = Gibbs(\n%s,\n)", indent(paste(entries, collapse = ",\n"))))
+    sprintf("et_sampler_for(DATA, LATENT!) = Gibbs(\n%s,\n)",
+            indent(paste(entries, collapse = ",\n"))),
+    "\nconst SPL = et_sampler_for(DATA, LATENT!)")
 }
 
 # The one piece that varies between models: how the Gibbs state maps to the
