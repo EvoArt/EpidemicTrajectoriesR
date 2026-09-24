@@ -52,17 +52,21 @@ cell rather than the window) or an exact forward recursion.
 
 With an \code{\link[=et_capture_recapture]{et_capture_recapture()}} score this needs nothing further: who was
 alive is read off the same capture matrix, looking ahead \strong{only to the end
-of the scored window}. That bound matters. A capture after \code{t + M} is
-outside the block being scored, and conditioning on it deletes a death
-branch carrying real probability mass: a lost positive contribution that
-no reweighting restores. Otherwise supply \code{known_present}, and bound it
-yourself.}
+of the scored window}, whichever step of the window is being simulated.
+That bound matters. A capture after the window's last occasion is outside
+the block being scored, and conditioning on it deletes a death branch
+carrying real probability mass: a lost positive contribution that no
+reweighting restores. It needs non-overlapping windows (\code{stride >= M}).
+Otherwise supply \code{known_present}, and bound it yourself.}
 
 \item{known_present}{Optional \code{\link[=et_julia]{et_julia()}} whose body is a function of \code{i}
 and \code{t} only: individual \code{i} is known to be alive at \code{t}. \strong{\code{data} is not
 in scope}: ET calls this as \code{known_present(i, t)}, so reach arrays through
-the generated module's own \code{DATA}, e.g. \code{t <= DATA.last_seen[i]}. Ignored
-unless \code{constrain_survival} is \code{TRUE}.}
+the generated module's own \code{DATA}, e.g. \code{t <= DATA.last_seen[i]}. The
+window's cutoff is not passed either, so a lookahead such as
+\code{t:(t + M - 1)} runs past the window for every step after the first; bound
+it at the end of the window \code{t} belongs to. Ignored unless
+\code{constrain_survival} is \code{TRUE}.}
 
 \item{n_sim}{Forward trajectories per posterior draw per window.}
 

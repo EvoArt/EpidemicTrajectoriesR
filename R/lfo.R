@@ -23,15 +23,27 @@
 #'   arrays a sampler mutates in place.
 #' @param keep Character vector of `extras` names carried through untouched: an
 #'   explicit "this is a covariate, not a leak".
+#' @param custom Named list of [et_julia()] rules, one per `extras` name, for
+#'   anything the four fixed rules do not cover. Each body is a Julia function
+#'   of `v` (the full-series value) and `cutoff`, returning the value the fit
+#'   at that cutoff should see. The generated module's `DATA` is in scope.
 #' @param strict Error on an undeclared, time-shaped extra (the default and the
 #'   safe choice).
 #' @return An object of class `et_lfo_truncation`.
 #' @export
 et_lfo_truncation <- function(clamp = character(), filter = character(),
                               copy = character(), keep = character(),
-                              strict = TRUE) {
+                              custom = list(), strict = TRUE) {
+  if (length(custom)) {
+    if (is.null(names(custom)) || any(!nzchar(names(custom))) ||
+        !all(vapply(custom, inherits, logical(1), "et_julia"))) {
+      stop("et_lfo_truncation(): `custom` must be a named list of et_julia() ",
+           "rules, one per extras name.", call. = FALSE)
+    }
+    check_julia_name(names(custom), "extras name")
+  }
   structure(list(clamp = clamp, filter = filter, copy = copy, keep = keep,
-                 strict = isTRUE(strict)),
+                 custom = custom, strict = isTRUE(strict)),
             class = "et_lfo_truncation")
 }
 
@@ -41,6 +53,7 @@ print.et_lfo_truncation <- function(x, ...) {
   for (r in c("clamp", "filter", "copy", "keep")) {
     if (length(x[[r]])) cat("  ", r, ": ", paste(x[[r]], collapse = ", "), "\n", sep = "")
   }
+  if (length(x$custom)) cat("  custom: ", paste(names(x$custom), collapse = ", "), "\n", sep = "")
   invisible(x)
 }
 
@@ -52,6 +65,12 @@ truncation_src <- function(plan) {
     sprintf("%s=%s", nm, julia_symbol_tuple(v))
   }
   parts <- Filter(Negate(is.null), lapply(c("clamp", "filter", "copy", "keep"), arg))
+  if (length(plan$custom)) {
+    rules <- vapply(names(plan$custom), function(nm) sprintf(
+      "%s => ((v, cutoff) -> begin\n%s\nend)", julia_symbol(nm),
+      indent(plan$custom[[nm]]$src)), character(1))
+    parts <- c(parts, sprintf("custom=(%s,)", paste(rules, collapse = ", ")))
+  }
   parts <- c(parts, sprintf("strict=%s", if (plan$strict) "true" else "false"))
   sprintf("truncation(%s)", paste(parts, collapse = ", "))
 }

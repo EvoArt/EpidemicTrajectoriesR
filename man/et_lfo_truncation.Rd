@@ -9,6 +9,7 @@ et_lfo_truncation(
   filter = character(),
   copy = character(),
   keep = character(),
+  custom = list(),
   strict = TRUE
 )
 }
@@ -24,6 +25,11 @@ arrays a sampler mutates in place.}
 
 \item{keep}{Character vector of \code{extras} names carried through untouched: an
 explicit "this is a covariate, not a leak".}
+
+\item{custom}{Named list of \code{\link[=et_julia]{et_julia()}} rules, one per \code{extras} name, for
+anything the four fixed rules do not cover. Each body is a Julia function
+of \code{v} (the full-series value) and \code{cutoff}, returning the value the fit
+at that cutoff should see. The generated module's \code{DATA} is in scope.}
 
 \item{strict}{Error on an undeclared, time-shaped extra (the default and the
 safe choice).}

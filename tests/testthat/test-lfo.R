@@ -43,6 +43,16 @@ test_that("truncation declarations become a truncation() call", {
   expect_match(trunc_src(et_lfo_truncation(strict = FALSE)), "strict=false")
 })
 
+test_that("a custom truncation rule becomes a (v, cutoff) function", {
+  p <- et_lfo_truncation(keep = "sex",
+                         custom = list(flag = et_julia("w = zero(v); w[cutoff, 1] = 1; w")))
+  src <- trunc_src(p)
+  expect_match(src, "custom=(:flag => ((v, cutoff) -> begin", fixed = TRUE)
+  expect_true(julia_parses(src))
+  expect_error(et_lfo_truncation(custom = list(et_julia("v"))), "named list")
+  expect_error(et_lfo_truncation(custom = list(flag = "v")), "named list")
+})
+
 test_that("a capture-recapture score writes its own observation density", {
   s <- et_lfo_spec(cell_logdensity = cr, truncation = plan)
   src <- spec_src(s, plan_expr = "plan")
