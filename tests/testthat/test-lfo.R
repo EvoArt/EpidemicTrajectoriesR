@@ -55,7 +55,7 @@ test_that("a capture-recapture score writes its own observation density", {
 test_that("constrain_survival adds BOTH halves of the survival correction", {
   s <- et_lfo_spec(cell_logdensity = cr, truncation = plan,
                    constrain_survival = TRUE)
-  s$known_present <- known_src(cr, 3)       # et_lfo_cv() does this once M is known
+  s$known_present <- known_src(cr, 30, 3, 3) # et_lfo_cv() does this once L, M, stride are known
   src <- spec_src(s, plan_expr = "plan")
   # Constraining without the matching weight is a bias that does not shrink
   # with n_sim, so the two must always appear together.
@@ -90,14 +90,27 @@ test_that("a hand-written score still works, and needs et_julia", {
 })
 
 test_that("the constraint looks ahead only to the end of the scored window", {
-  # A capture after t + M is OUTSIDE the block being scored. Conditioning on it
-  # deletes a death branch carrying real mass -- a lost positive contribution
-  # that no reweighting restores -- so the lookahead is bounded by M, and the
-  # lookup is built per M rather than once over the whole series.
-  expect_match(known_src(cr, 3)$src, "_et_seen_within_caught_M3", fixed = TRUE)
-  expect_match(known_src(cr, 1)$src, "_et_seen_within_caught_M1", fixed = TRUE)
-  expect_match(seen_src(cr, 3), "t:min(t + 3 - 1, T)", fixed = TRUE)
-  expect_true(julia_parses(seen_src(cr, 3)))
+  # A capture after the window's last occasion is OUTSIDE the block being
+  # scored. Conditioning on it deletes a death branch carrying real mass -- a
+  # lost positive contribution that no reweighting restores. The bound is the
+  # end of the window each step belongs to: a fixed lookahead of M - 1 from
+  # every step reaches past it for all steps after the first.
+  expect_match(known_src(cr, 4, 2, 2)$src, "_et_seen_to_end_caught_L4_S2_M2",
+               fixed = TRUE)
+  bin <- Sys.which("julia")
+  skip_if(!nzchar(bin), "no julia binary on PATH")
+  # One individual, T = 9, caught only at occasion 7. L = 4, M = 2, stride = 2:
+  # windows are 5:6 and 7:8. Step 6 ends the first window, so the capture at 7
+  # must not make it known present; steps 7 and 8's window does contain it.
+  f <- tempfile(fileext = ".jl")
+  writeLines(c(
+    "DATA = (caught = reshape([0, 0, 0, 0, 0, 0, 1, 0, 0], 9, 1),",
+    "        n_timepoints = 9, n_individuals = 1)",
+    seen_src(cr, 4, 2, 2),
+    "got = vec(_et_seen_to_end_caught_L4_S2_M2)[5:8]",
+    "exit(got == [false, false, true, false] ? 0 : 1)"), f)
+  expect_equal(system2(bin, c("--startup-file=no", shQuote(f)),
+                       stdout = FALSE, stderr = FALSE), 0L)
 })
 
 test_that("a test makes the observation depend on the INFECTION state", {
@@ -175,7 +188,7 @@ test_that("a model where every state is observable has no contradiction branch",
 test_that("the constraint and the score read the same capture matrix", {
   # Derived, not restated: they cannot drift into disagreeing about who was
   # alive, which would break the co-gating the weight depends on.
-  expect_match(known_src(cr, 2)$src, cr$caught, fixed = TRUE)
+  expect_match(known_src(cr, 10, 2, 2)$src, cr$caught, fixed = TRUE)
   expect_match(cr_ld(cr)$src, cr$caught, fixed = TRUE)
 })
 

@@ -256,18 +256,33 @@ cr_test_src <- function(test, infected) {
 # the honest answer is 0.4*0.5 + 0.6 = 0.8, and forcing survival on the strength
 # of a later capture leaves 0.2.) So condition only on y_{(t+1):(t+M)}.
 #
-# `_et_seen_within` is an n_timepoints x n_individuals Bool: is there a capture
-# at some u in [t, t + M - 1]? Precomputed per M, so the constraint is a lookup.
-cr_known_present <- function(cr, M) {
-  et_julia(sprintf("_et_seen_within_%s_M%s[t, i]", cr$caught, julia_int(M)))
+# The bound is the end of the window step `t` belongs to, not `t + M - 1`: a
+# fixed lookahead from each step reaches past the window for every step after
+# the first. ET calls the constraint as `known_present(i, t)`, without the
+# cutoff, so the end has to be recoverable from `t` alone. With non-overlapping
+# windows (stride >= M) it is: step `t` lies in the window of cutoff
+# L + stride * floor((t - L - 1) / stride), which ends M steps later.
+#
+# `_et_seen_to_end` is an n_timepoints x n_individuals Bool: is there a capture
+# at some u in [t, end of t's window]? Precomputed per (L, stride, M), so the
+# constraint is a lookup.
+cr_seen_name <- function(cr, L, M, stride)
+  sprintf("_et_seen_to_end_%s_L%s_S%s_M%s", cr$caught, julia_int(L),
+          julia_int(stride), julia_int(M))
+
+cr_known_present <- function(cr, L, M, stride) {
+  et_julia(sprintf("%s[t, i]", cr_seen_name(cr, L, M, stride)))
 }
 
-cr_seen_within_src <- function(cr, M) {
+cr_seen_within_src <- function(cr, L, M, stride) {
   sprintf(paste0(
-    "const _et_seen_within_%s_M%s = let y = DATA.%s, T = DATA.n_timepoints\n",
-    "    [any(==(1), @view y[t:min(t + %s - 1, T), i])\n",
+    "const %s = let y = DATA.%s, T = DATA.n_timepoints\n",
+    "    stop = [t <= %s ? t : %s + fld(t - %s - 1, %s) * %s + %s for t in 1:T]\n",
+    "    [any(==(1), @view y[t:min(stop[t], T), i])\n",
     "     for t in 1:T, i in 1:DATA.n_individuals]\n",
-    "end"), cr$caught, julia_int(M), cr$caught, julia_int(M))
+    "end"), cr_seen_name(cr, L, M, stride), cr$caught,
+    julia_int(L), julia_int(L), julia_int(L), julia_int(stride),
+    julia_int(stride), julia_int(M))
 }
 
 #' A leave-future-out scoring specification.
@@ -314,16 +329,20 @@ cr_seen_within_src <- function(cr, M) {
 #'
 #'   With an [et_capture_recapture()] score this needs nothing further: who was
 #'   alive is read off the same capture matrix, looking ahead **only to the end
-#'   of the scored window**. That bound matters. A capture after `t + M` is
-#'   outside the block being scored, and conditioning on it deletes a death
-#'   branch carrying real probability mass: a lost positive contribution that
-#'   no reweighting restores. Otherwise supply `known_present`, and bound it
-#'   yourself.
+#'   of the scored window**, whichever step of the window is being simulated.
+#'   That bound matters. A capture after the window's last occasion is outside
+#'   the block being scored, and conditioning on it deletes a death branch
+#'   carrying real probability mass: a lost positive contribution that no
+#'   reweighting restores. It needs non-overlapping windows (`stride >= M`).
+#'   Otherwise supply `known_present`, and bound it yourself.
 #' @param known_present Optional [et_julia()] whose body is a function of `i`
 #'   and `t` only: individual `i` is known to be alive at `t`. **`data` is not
 #'   in scope**: ET calls this as `known_present(i, t)`, so reach arrays through
-#'   the generated module's own `DATA`, e.g. `t <= DATA.last_seen[i]`. Ignored
-#'   unless `constrain_survival` is `TRUE`.
+#'   the generated module's own `DATA`, e.g. `t <= DATA.last_seen[i]`. The
+#'   window's cutoff is not passed either, so a lookahead such as
+#'   `t:(t + M - 1)` runs past the window for every step after the first; bound
+#'   it at the end of the window `t` belongs to. Ignored unless
+#'   `constrain_survival` is `TRUE`.
 #' @param n_sim Forward trajectories per posterior draw per window.
 #' @param seed Base RNG seed for the forward simulation.
 #' @return An object of class `et_lfo_spec`.
@@ -529,11 +548,18 @@ et_lfo_cv <- function(model, spec, L, M, granularity = "pointwise", stride = 1L,
   # of the scored block. Bound once per (matrix, M).
   cr <- spec$capture_recapture
   if (!is.null(cr) && isTRUE(spec$constrain_survival)) {
-    spec$known_present <- cr_known_present(cr, M)
+    # Overlapping windows put one step in several windows with different ends,
+    # and a lookup indexed by (t, i) cannot tell them apart.
+    if (stride < M) {
+      stop("et_lfo_cv(): constrain_survival with a capture-recapture score ",
+           "needs non-overlapping windows (stride >= M), so that each step's ",
+           "window end is known.", call. = FALSE)
+    }
+    spec$known_present <- cr_known_present(cr, L, M, stride)
     sw_sym <- paste0(mod, "_lfo_seenwithin_src")
     JuliaCall::julia_assign(sw_sym, sprintf(
-      "if !isdefined(@__MODULE__, :_et_seen_within_%s_M%s)\n%s\nend",
-      cr$caught, julia_int(M), cr_seen_within_src(cr, M)))
+      "if !isdefined(@__MODULE__, :%s)\n%s\nend",
+      cr_seen_name(cr, L, M, stride), cr_seen_within_src(cr, L, M, stride)))
     JuliaCall::julia_command(sprintf("Base.include_string(%s, Main.%s)",
                                      mod, sw_sym))
   }
