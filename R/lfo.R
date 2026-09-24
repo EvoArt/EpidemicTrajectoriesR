@@ -486,6 +486,10 @@ lfo_spec_src <- function(spec, plan_expr) {
 #'   which looks like a working comparison that resolves nothing. Truncation
 #'   keeps the full time dimension, so one matrix is the right shape at every
 #'   cutoff.
+#' @param fit_seed Base seed for the refits: the chain at cutoff `t` is seeded
+#'   `fit_seed + t`. Independent chains at the same cutoffs need different
+#'   values, and their own `cache` directories, since the cache is keyed on the
+#'   cutoff alone.
 #' @param quiet Suppress progress messages.
 #' @return An object of class `et_lfo_result`. `$granularities` names what was
 #'   scored; use [et_lfo_elpd()] and [et_lfo_compare()] to read it.
@@ -493,7 +497,7 @@ lfo_spec_src <- function(spec, plan_expr) {
 et_lfo_cv <- function(model, spec, L, M, granularity = "pointwise", stride = 1L,
                       blocks = list(), n_sweeps = 1000, n_burn = 0, n_adapts = 0,
                       adtype = "forwarddiff", cache = NULL, x_init = NULL,
-                      quiet = FALSE) {
+                      fit_seed = 1000L, quiet = FALSE) {
   et_require_session()
   if (!inherits(model, "et_model")) {
     stop("et_lfo_cv(): `model` must come from et_model().", call. = FALSE)
@@ -594,14 +598,14 @@ et_lfo_cv <- function(model, spec, L, M, granularity = "pointwise", stride = 1L,
     "%s\n",
     "    et_lfo_cv(spec; L=%s, M=%s, granularity=(%s,), stride=%s, cache=%s,\n",
     "              verbose=%s, n_sweeps=%s, n_burn=%s, n_adapts=%s, adtype=%s,\n",
-    "              x_init=%s)\n",
+    "              x_init=%s, fit_seed=%s)\n",
     "end"),
     truncation_src(spec$truncation),
     indent(lfo_spec_src(spec, plan_expr = "plan")),
     julia_int(L), julia_int(M), gran_src, julia_int(stride), cache_src,
     if (quiet) "false" else "true",
     julia_int(n_sweeps), julia_int(n_burn), julia_int(n_adapts),
-    adtype_to_julia(adtype), x_sym)
+    adtype_to_julia(adtype), x_sym, julia_int(fit_seed))
 
   # The result stays in Julia, under a name of its own, not round-tripped
   # through R, which has no faithful representation of an LFOResult (a Dict of
@@ -689,9 +693,9 @@ lfo_inject_src <- function(model) {
     "# for why shortening n_timepoints alone is not enough.\n",
     "function et_lfo_cv(spec; L, M, granularity, stride=1, cache=nothing,\n",
     "                    verbose=true, n_sweeps, n_burn=0, n_adapts=0, adtype,\n",
-    "                    x_init=nothing)\n",
+    "                    x_init=nothing, fit_seed=1000)\n",
     "    fitfn = (train, t) -> et_lfo_fit(train; n_sweeps=n_sweeps, n_burn=n_burn,\n",
-    "                                      n_adapts=n_adapts, seed=1000 + t, adtype=adtype,\n",
+    "                                      n_adapts=n_adapts, seed=fit_seed + t, adtype=adtype,\n",
     "                                      x_init=x_init)\n",
     "    spec2 = LFOSpec(fit=fitfn, cell_logdensity=spec.cell_logdensity,\n",
     "                    plan=spec.plan, is_informative=spec.is_informative,\n",

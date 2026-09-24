@@ -18,6 +18,7 @@ et_lfo_cv(
   adtype = "forwarddiff",
   cache = NULL,
   x_init = NULL,
+  fit_seed = 1000L,
   quiet = FALSE
 )
 }
@@ -54,6 +55,11 @@ unidentified — and two models differing only in that term fit identically,
 which looks like a working comparison that resolves nothing. Truncation
 keeps the full time dimension, so one matrix is the right shape at every
 cutoff.}
+
+\item{fit_seed}{Base seed for the refits: the chain at cutoff \code{t} is seeded
+\code{fit_seed + t}. Independent chains at the same cutoffs need different
+values, and their own \code{cache} directories, since the cache is keyed on the
+cutoff alone.}
 
 \item{quiet}{Suppress progress messages.}
 }

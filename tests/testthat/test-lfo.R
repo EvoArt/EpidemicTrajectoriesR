@@ -269,3 +269,60 @@ test_that("the injected fit takes x_init and defaults to all-susceptible", {
   expect_match(src, "x_init=x_init", fixed = TRUE)
   expect_true(julia_parses(src))
 })
+
+test_that("the refit seed is an argument, so chains at a cutoff can differ", {
+  src <- inject_src(toy_model())
+  # The default keeps existing results reproducible; a second chain needs its own.
+  expect_match(src, "fit_seed=1000)", fixed = TRUE)
+  expect_match(src, "seed=fit_seed + t", fixed = TRUE)
+  expect_false(grepl("seed=1000 + t", src, fixed = TRUE))
+  expect_true("fit_seed" %in% names(formals(et_lfo_cv)))
+  expect_equal(eval(formals(et_lfo_cv)$fit_seed), 1000L)
+})
+
+# ---- model weights ---------------------------------------------------------
+#
+# The weight call is assembled as a Julia string INSIDE an R string, so the one
+# thing that can silently break it is quoting: a `"name"` key would close the
+# outer string early and emit invalid Julia. Symbol keys avoid that, and these
+# tests pin it -- the generated call must parse.
+
+weights_call <- function(names, syms, granularity = "joint",
+                         method = "stacking") {
+  js <- EpidemicTrajectoriesR:::julia_symbol
+  pairs <- paste(sprintf("%s => %s",
+                         vapply(names, js, character(1)),
+                         syms), collapse = ", ")
+  sprintf("model_weights(Dict(%s); granularity=%s, method=%s)",
+          pairs, js(granularity), js(method))
+}
+
+test_that("the weights call uses symbol keys, so the quoting cannot break", {
+  src <- weights_call(c("null", "rate", "suscept"), c("r1", "r2", "r3"))
+  # no double quotes anywhere: that is the property that keeps it valid once
+  # it is embedded in the R string that carries it to Julia
+  expect_false(grepl('"', src, fixed = TRUE))
+  expect_match(src, ":null => r1")
+  expect_match(src, "granularity=:joint")
+  expect_true(julia_parses(src))
+})
+
+test_that("the embedded call survives the R string that carries it", {
+  inner <- weights_call(c("a", "b"), c("x", "y"))
+  full <- sprintf("Base.include_string(%s, \"%s\")", "MOD", inner)
+  expect_true(julia_parses(full))
+})
+
+test_that("et_lfo_weights refuses what cannot be weighted", {
+  fake <- structure(list(module = "M", sym = "s", granularities = "joint"),
+                    class = "et_lfo_result")
+  expect_error(et_lfo_weights(list(a = fake)), "at least two")
+  expect_error(et_lfo_weights(list(fake, fake)), "name the list")
+  expect_error(et_lfo_weights(list(a = fake, b = "not a result")),
+               "et_lfo_cv")
+  other <- structure(list(module = "OTHER", sym = "s2",
+                          granularities = "joint"), class = "et_lfo_result")
+  expect_error(et_lfo_weights(list(a = fake, b = other)), "SAME Julia module")
+  expect_error(et_lfo_weights(list(a = fake, b = fake), method = "nonesuch"),
+               "arg")
+})
