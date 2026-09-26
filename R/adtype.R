@@ -61,10 +61,12 @@ adtype_to_julia <- function(x) {
   if (x$name == "polyester" && et_is_ready() &&
       identical(.et_state$polyester, FALSE)) {
     stop("et_adtype(\"polyester\"): PolyesterForwardDiff did not load in this ",
-         "session, so the threaded forward backend is unavailable. Use ",
-         "\"forwarddiff\" (same answers, one thread), or repair the Julia ",
-         "environment -- its DifferentiationInterface extension fails to ",
-         "precompile on some Julia 1.11 resolutions.", call. = FALSE)
+         "session (Julia ", JuliaCall::julia_eval("string(VERSION)"), "), so ",
+         "the threaded forward backend is unavailable. Use \"forwarddiff\" ",
+         "(same answers, one thread), or a newer Julia: 1.11.1 does not load ",
+         "DifferentiationInterface's ForwardDiff extension while precompiling ",
+         "its PolyesterForwardDiff one, which requires it. 1.10 and 1.11.3+ ",
+         "load it.", call. = FALSE)
   }
   kw <- character()
   if (!is.null(x$chunksize)) {

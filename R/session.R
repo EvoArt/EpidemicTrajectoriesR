@@ -50,9 +50,10 @@ et_setup <- function(julia_home = NULL, project = NULL, dev = NULL,
   }
   # PolyesterForwardDiff is a speed option, not a requirement, so a session
   # starts without it. Its DifferentiationInterface extension fails to
-  # precompile on some Julia 1.11 resolutions, and loading it unconditionally
-  # made that failure fatal to every fit rather than to the one backend nobody
-  # had asked for. et_adtype("polyester") reports the absence if it is wanted.
+  # precompile on Julia 1.11.1 (1.10 and 1.11.3+ are fine), and loading it
+  # unconditionally made that failure fatal to every fit rather than to the one
+  # backend nobody had asked for. et_adtype("polyester") reports the absence
+  # if it is wanted.
   .et_state$polyester <- isTRUE(tryCatch({
     JuliaCall::julia_command("using PolyesterForwardDiff"); TRUE
   }, error = function(e) FALSE))
