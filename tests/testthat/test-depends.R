@@ -62,6 +62,32 @@ test_that("reads reached through a HELPER are declared too", {
   expect_match(g$src, "eltype(model.alpha)", fixed = TRUE)
 })
 
+test_that("reads reached through a helper OF a helper are declared too", {
+  # One level of helpers is not enough: a rate calling `foi`, which calls
+  # `base_rate`, reads `alpha` two calls down. Missing it would leave a Gibbs
+  # block holding only `alpha` skipping the likelihood and sampling its prior.
+  base_rate <- function(model) model$alpha
+  foi <- function(model, i_minus) base_rate(model) + model$beta * i_minus
+  rate <- function(model, data, i, t) {
+    -expm1(-foi(model, data$aggregates$n_infected[data$group[i], t]))
+  }
+  d <- et_data(
+    n_individuals = TOY_N, n_timepoints = TOY_T,
+    transitions = et_transitions(toy_states, "S -> I" = rate,
+                                 "I -> S" = toy_recovery),
+    starting_state = toy_start, aggregates = toy_aggregate(),
+    group = rep(seq_len(TOY_PENS), each = TOY_PER_PEN),
+    observation_weight = toy_obs,
+    helpers = list(et_helper(base_rate, "base_rate"), et_helper(foi, "foi")),
+    extras = list(y = toy_y()))
+  m <- et_model(data = d, parameters = toy_model()$parameters,
+                derived = list(m = quote(m_tilde + 1)))
+  g <- et_julia_source(m)
+  expect_true(all(c("alpha", "beta") %in% g$depends$epidemic))
+  prologue <- regmatches(g$src, regexpr("function et_rate_S_I[^\n]*\n[^\n]*", g$src))
+  expect_match(prologue, "eltype(model.alpha)", fixed = TRUE)
+})
+
 test_that("a coupling-only rate does NOT enter depends", {
   # `coupling_trans_mat` is never seen by epidemic_loglik, so a parameter that
   # appears only there contributes nothing to any gradient. Declaring it would
