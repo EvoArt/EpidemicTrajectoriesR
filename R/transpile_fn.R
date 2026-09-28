@@ -126,7 +126,7 @@ et_transpile_role <- function(f, role, name, helpers = list()) {
   # Reads reached through helpers count too, that transitivity is exactly what
   # makes an automatically derived `depends=` trustworthy.
   reads <- union(reads, helper_reads(used_helpers, helpers))
-  opaque <- any(vapply(helpers[helper_names %in% used_helpers],
+  opaque <- any(vapply(helpers[helper_names %in% helper_closure(used_helpers, helpers)],
                        function(h) inherits(h$f, "et_julia") && is.null(h$f$reads),
                        logical(1)))
 
@@ -216,7 +216,7 @@ helper_reads <- function(used, helpers) {
   if (!length(used) || !length(helpers)) return(character())
   out <- character()
   for (h in helpers) {
-    if (!(h$name %in% used)) next
+    if (!(h$name %in% helper_closure(used, helpers))) next
     if (inherits(h$f, "et_julia")) {
       out <- union(out, h$f$reads %||% character())
       next
@@ -224,10 +224,30 @@ helper_reads <- function(used, helpers) {
     ctx <- new_ctx(helpers = vapply(helpers, function(x) x$name, character(1)))
     transpile_braced_body(body(h$f), ctx)
     out <- union(out, ctx$reads$model)
-    # One level of nesting is followed here; deeper chains are resolved by the
-    # fixed point in et_helper_closure().
   }
   out
+}
+
+# Every helper reachable from `used`, through helpers calling helpers. A helper
+# two calls deep still reads parameters, and missing them would drop a
+# parameter from `depends=` -- a Gibbs block holding only that parameter would
+# then skip the likelihood and sample its prior.
+helper_closure <- function(used, helpers) {
+  names_all <- vapply(helpers, function(h) h$name, character(1))
+  seen <- intersect(used, names_all)
+  frontier <- seen
+  while (length(frontier)) {
+    nxt <- character()
+    for (h in helpers[names_all %in% frontier]) {
+      if (inherits(h$f, "et_julia")) next
+      ctx <- new_ctx(helpers = names_all)
+      transpile_braced_body(body(h$f), ctx)
+      nxt <- union(nxt, ctx$reads$helpers)
+    }
+    frontier <- setdiff(nxt, seen)
+    seen <- union(seen, frontier)
+  }
+  seen
 }
 
 # Emit every helper definition, in declaration order.
