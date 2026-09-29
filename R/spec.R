@@ -145,7 +145,15 @@ parse_aggregate_stmt <- function(e, array_names, ctx, guard = NULL) {
     }
     cond <- et_transpile_expr(e[[2]], ctx)
     inner <- parse_aggregate_body(e[[3]], array_names, ctx, guard)
-    return(paste0("if ", cond, "\n", indent(paste(inner, collapse = "\n")), "\nend"))
+    # `@aggregate` takes exactly one update per guarded line, so an `if` around
+    # several updates becomes one guarded line each, and a nested guard is
+    # combined with the outer one.
+    return(vapply(inner, function(line) {
+      nested <- regmatches(line, regexec("^if (.*)\n    (.*)\nend$", line))[[1]]
+      if (length(nested)) paste0("if (", cond, ") && (", nested[2], ")\n    ",
+                                 nested[3], "\nend")
+      else paste0("if ", cond, "\n", indent(line), "\nend")
+    }, character(1), USE.NAMES = FALSE))
   }
 
   if (!(op %in% c("<-", "="))) stop(agg_error(e), call. = FALSE)
@@ -215,14 +223,31 @@ et_survival <- function(fn, death) {
 #' @param survival Optional [et_survival()].
 #' @param auto_self Fill each state's self-transition with the leftover
 #'   probability mass (ET's `:auto_self`, on by default).
+#' @param shared Optional function `(model, data, i, t)` returning a `list()` of
+#'   named quantities that several rates need, computed once per individual and
+#'   timepoint instead of once per rate. Every rate (and the survival function)
+#'   then takes a fifth argument, `shared`, and reads them as `shared$name`.
+#'   Worth it whenever rates repeat work: a death probability scaling every
+#'   live move, a hazard built from covariates.
 #' @return An object of class `et_transitions`.
 #' @export
 #' @examples
 #' infection <- function(model, data, i, t) -expm1(-model$alpha)
 #' recovery  <- function(model, data, i, t) 1 / model$m
 #' et_transitions(c("S", "I"), "S -> I" = infection, "I -> S" = recovery)
-et_transitions <- function(states, ..., survival = NULL, auto_self = TRUE) {
+#'
+#' # one death probability, computed once, in both moves out of S
+#' et_transitions(c("S", "I", "D"),
+#'   shared = function(model, data, i, t) list(die = -expm1(-model$mu)),
+#'   "S -> I" = function(model, data, i, t, shared) (1 - shared$die) * model$beta,
+#'   "S -> D" = function(model, data, i, t, shared) shared$die)
+et_transitions <- function(states, ..., survival = NULL, auto_self = TRUE,
+                           shared = NULL) {
   states <- check_states(states)
+  if (!is.null(shared) && !is.function(shared) && !inherits(shared, "et_julia")) {
+    stop("et_transitions(): `shared` must be a function(model, data, i, t) ",
+         "returning a list(), or an et_julia().", call. = FALSE)
+  }
   args <- list(...)
   nms <- names(args) %||% rep("", length(args))
   trans <- list()
@@ -272,7 +297,8 @@ et_transitions <- function(states, ..., survival = NULL, auto_self = TRUE) {
          paste(unique(key[duplicated(key)]), collapse = ", "), ".", call. = FALSE)
   }
   structure(list(states = states, transitions = trans, survival = survival,
-                 auto_self = isTRUE(auto_self)), class = "et_transitions")
+                 auto_self = isTRUE(auto_self), shared = shared),
+            class = "et_transitions")
 }
 
 #' @export

@@ -4,7 +4,13 @@
 \alias{et_model}
 \title{Assemble the full model: data, parameters, priors and deterministics.}
 \usage{
-et_model(data, parameters, derived = list(), entry_time = NULL)
+et_model(
+  data,
+  parameters,
+  derived = list(),
+  entry_time = NULL,
+  likelihood = c("augmented", "marginal")
+)
 }
 \arguments{
 \item{data}{An \code{\link[=et_data]{et_data()}} object.}
@@ -21,6 +27,25 @@ gate, which scores disease transitions before entry but not the survival
 factor. Requires the transitions to declare an \code{\link[=et_survival]{et_survival()}}: the same
 function is passed through automatically, which is the only way the
 subtraction removes exactly what was multiplied in.}
+
+\item{likelihood}{How the hidden trajectories are handled.
+\itemize{
+\item \code{"augmented"} (the default): the trajectory is a latent block, resampled
+by iFFBS once per Gibbs sweep, and the parameters see the complete-data
+likelihood given it. Works for any model, coupled or not.
+\item \code{"marginal"}: the trajectories are summed out exactly by the forward
+algorithm, and the parameters are fitted against the marginal likelihood
+alone, with no latent block, no \code{x_init} and no conjugate kernels. Valid
+only when individuals are independent given the parameters: give each
+individual its own group, or declare \code{coupled_transitions = list()} in
+\code{\link[=et_data]{et_data()}}. The rates must not read the aggregates, and the observation
+and starting-state functions must not read \code{X}; this is checked
+numerically when the module is first used.
+}
+
+Cheaper and exactly mixing where it applies, because there is no
+trajectory to mix over. It is also what makes \code{\link[=et_lfo_spec]{et_lfo_spec()}}'s
+\code{method = "exact_hmm"} score available without latent draws.}
 }
 \value{
 An object of class \code{et_model}.

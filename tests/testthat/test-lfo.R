@@ -10,7 +10,6 @@
 trunc_src  <- EpidemicTrajectoriesR:::truncation_src
 spec_src   <- EpidemicTrajectoriesR:::lfo_spec_src
 inject_src <- EpidemicTrajectoriesR:::lfo_inject_src
-seen_src   <- EpidemicTrajectoriesR:::cr_seen_within_src
 known_src  <- EpidemicTrajectoriesR:::cr_known_present
 cr_ld      <- EpidemicTrajectoriesR:::cr_cell_logdensity
 unobs_src  <- EpidemicTrajectoriesR:::cr_unobservable_src
@@ -65,7 +64,7 @@ test_that("a capture-recapture score writes its own observation density", {
 test_that("constrain_survival adds BOTH halves of the survival correction", {
   s <- et_lfo_spec(cell_logdensity = cr, truncation = plan,
                    constrain_survival = TRUE)
-  s$known_present <- known_src(cr, 30, 3, 3) # et_lfo_cv() does this once L, M, stride are known
+  s$known_present <- known_src(cr)         # as et_lfo_cv() does
   src <- spec_src(s, plan_expr = "plan")
   # Constraining without the matching weight is a bias that does not shrink
   # with n_sim, so the two must always appear together.
@@ -102,23 +101,27 @@ test_that("a hand-written score still works, and needs et_julia", {
 test_that("the constraint looks ahead only to the end of the scored window", {
   # A capture after the window's last occasion is OUTSIDE the block being
   # scored. Conditioning on it deletes a death branch carrying real mass -- a
-  # lost positive contribution that no reweighting restores. The bound is the
-  # end of the window each step belongs to: a fixed lookahead of M - 1 from
-  # every step reaches past it for all steps after the first.
-  expect_match(known_src(cr, 4, 2, 2)$src, "_et_seen_to_end_caught_L4_S2_M2",
+  # lost positive contribution that no reweighting restores. ET passes the end
+  # of the window being simulated as `last_t`, so the bound holds whether or
+  # not windows overlap.
+  expect_equal(known_src(cr)$src, "any(==(1), @view DATA.caught[t:last_t, i])")
+  s <- et_lfo_spec(et_julia("0.0"), plan, constrain_survival = TRUE,
+                   known_present = "caught")
+  expect_equal(s$known_present$src, known_src(cr)$src)
+  expect_match(spec_src(s, "plan"), "survival_constrained((i, t, last_t) -> begin",
                fixed = TRUE)
   bin <- Sys.which("julia")
   skip_if(!nzchar(bin), "no julia binary on PATH")
-  # One individual, T = 9, caught only at occasion 7. L = 4, M = 2, stride = 2:
-  # windows are 5:6 and 7:8. Step 6 ends the first window, so the capture at 7
-  # must not make it known present; steps 7 and 8's window does contain it.
+  # One individual, T = 9, caught only at occasion 7. In the window ending at
+  # 6 the capture at 7 must not make it known present at 5 or 6; in the window
+  # 5:8 it does, at every step up to 7.
   f <- tempfile(fileext = ".jl")
   writeLines(c(
     "DATA = (caught = reshape([0, 0, 0, 0, 0, 0, 1, 0, 0], 9, 1),",
     "        n_timepoints = 9, n_individuals = 1)",
-    seen_src(cr, 4, 2, 2),
-    "got = vec(_et_seen_to_end_caught_L4_S2_M2)[5:8]",
-    "exit(got == [false, false, true, false] ? 0 : 1)"), f)
+    sprintf("kp(i, t, last_t) = %s", known_src(cr)$src),
+    "got = [kp(1, 5, 6), kp(1, 6, 6), kp(1, 5, 8), kp(1, 7, 8), kp(1, 8, 8)]",
+    "exit(got == [false, false, true, true, false] ? 0 : 1)"), f)
   expect_equal(system2(bin, c("--startup-file=no", shQuote(f)),
                        stdout = FALSE, stderr = FALSE), 0L)
 })
@@ -198,7 +201,7 @@ test_that("a model where every state is observable has no contradiction branch",
 test_that("the constraint and the score read the same capture matrix", {
   # Derived, not restated: they cannot drift into disagreeing about who was
   # alive, which would break the co-gating the weight depends on.
-  expect_match(known_src(cr, 10, 2, 2)$src, cr$caught, fixed = TRUE)
+  expect_match(known_src(cr)$src, cr$caught, fixed = TRUE)
   expect_match(cr_ld(cr)$src, cr$caught, fixed = TRUE)
 })
 
@@ -273,9 +276,58 @@ test_that("the injected fit takes x_init and defaults to all-susceptible", {
 test_that("the refit seed is an argument, so chains at a cutoff can differ", {
   src <- inject_src(toy_model())
   # The default keeps existing results reproducible; a second chain needs its own.
-  expect_match(src, "fit_seed=1000)", fixed = TRUE)
+  expect_match(src, "fit_seed=1000, cutoffs=nothing, thin=1)", fixed = TRUE)
+  expect_match(src, "x_init=x_init, thin=thin)", fixed = TRUE)
+  expect_match(src, "cache=cache, cutoffs=cutoffs, verbose=verbose)", fixed = TRUE)
   expect_match(src, "seed=fit_seed + t", fixed = TRUE)
   expect_false(grepl("seed=1000 + t", src, fixed = TRUE))
   expect_true("fit_seed" %in% names(formals(et_lfo_cv)))
   expect_equal(eval(formals(et_lfo_cv)$fit_seed), 1000L)
+})
+
+# ---- model weights ---------------------------------------------------------
+#
+# The weight call is assembled as a Julia string INSIDE an R string, so the one
+# thing that can silently break it is quoting: a `"name"` key would close the
+# outer string early and emit invalid Julia. Symbol keys avoid that, and these
+# tests pin it -- the generated call must parse.
+
+weights_call <- function(names, syms, granularity = "joint",
+                         method = "stacking") {
+  js <- EpidemicTrajectoriesR:::julia_symbol
+  pairs <- paste(sprintf("%s => %s",
+                         vapply(names, js, character(1)),
+                         syms), collapse = ", ")
+  sprintf("model_weights(Dict(%s); granularity=%s, method=%s)",
+          pairs, js(granularity), js(method))
+}
+
+test_that("the weights call uses symbol keys, so the quoting cannot break", {
+  src <- weights_call(c("null", "rate", "suscept"), c("r1", "r2", "r3"))
+  # no double quotes anywhere: that is the property that keeps it valid once
+  # it is embedded in the R string that carries it to Julia
+  expect_false(grepl('"', src, fixed = TRUE))
+  expect_match(src, ":null => r1")
+  expect_match(src, "granularity=:joint")
+  expect_true(julia_parses(src))
+})
+
+test_that("the embedded call survives the R string that carries it", {
+  inner <- weights_call(c("a", "b"), c("x", "y"))
+  full <- sprintf("Base.include_string(%s, \"%s\")", "MOD", inner)
+  expect_true(julia_parses(full))
+})
+
+test_that("et_lfo_weights refuses what cannot be weighted", {
+  fake <- structure(list(module = "M", sym = "s", granularities = "joint"),
+                    class = "et_lfo_result")
+  expect_error(et_lfo_weights(list(a = fake)), "at least two")
+  expect_error(et_lfo_weights(list(fake, fake)), "name the list")
+  expect_error(et_lfo_weights(list(a = fake, b = "not a result")),
+               "et_lfo_cv")
+  other <- structure(list(module = "OTHER", sym = "s2",
+                          granularities = "joint"), class = "et_lfo_result")
+  expect_error(et_lfo_weights(list(a = fake, b = other)), "SAME Julia module")
+  expect_error(et_lfo_weights(list(a = fake, b = fake), method = "nonesuch"),
+               "arg")
 })

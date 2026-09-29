@@ -18,6 +18,8 @@ et_lfo_cv(
   adtype = "forwarddiff",
   cache = NULL,
   x_init = NULL,
+  cutoffs = NULL,
+  thin = 1L,
   fit_seed = 1000L,
   quiet = FALSE
 )
@@ -31,7 +33,8 @@ et_lfo_cv(
 
 \item{M}{Steps ahead scored per window.}
 
-\item{granularity}{One or more of \code{"pointwise"}, \code{"joint"}, \code{"by_group"}.
+\item{granularity}{One or more of \code{"pointwise"}, \code{"by_individual"}, \code{"joint"},
+\code{"by_group"}. \code{"by_individual"} scores each animal's full M-step history.
 \code{"by_group"} uses the model data's own \code{group}.}
 
 \item{stride}{Cutoff spacing (default every timepoint).}
@@ -55,6 +58,16 @@ unidentified — and two models differing only in that term fit identically,
 which looks like a working comparison that resolves nothing. Truncation
 keeps the full time dimension, so one matrix is the right shape at every
 cutoff.}
+
+\item{cutoffs}{Optional explicit vector of cutoffs, overriding
+\code{L:stride:(n_timepoints - M)}. \code{L} and \code{stride} still describe the grid the
+cutoffs sit on, which a capture-recapture survival constraint uses to find
+the end of the window each step belongs to.}
+
+\item{thin}{Keep every \code{thin}-th sweep after burn-in, so each cutoff's fit
+holds \code{n_sweeps \%/\% thin} draws. Every retained draw carries a whole
+\verb{n_timepoints x n_individuals} trajectory, so on a large population this is
+what keeps the fit, and its cache, in memory.}
 
 \item{fit_seed}{Base seed for the refits: the chain at cutoff \code{t} is seeded
 \code{fit_seed + t}. Independent chains at the same cutoffs need different

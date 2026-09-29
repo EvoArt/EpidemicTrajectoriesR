@@ -10,7 +10,8 @@ et_lfo_truncation(
   copy = character(),
   keep = character(),
   custom = list(),
-  strict = TRUE
+  strict = TRUE,
+  known_from = NULL
 )
 }
 \arguments{
@@ -33,6 +34,13 @@ at that cutoff should see. The generated module's \code{DATA} is in scope.}
 
 \item{strict}{Error on an undeclared, time-shaped extra (the default and the
 safe choice).}
+
+\item{known_from}{Optional name of an \code{extras} vector giving, per individual,
+the first time the study knew it existed. Needed when a sampling period
+opens before the individual is first observed (an animal born into a
+watched group but not caught until later). An individual not yet known at
+a cutoff is left out of that cutoff's fit, and is neither scored nor
+simulated in its window. Defaults to the start of each sampling period.}
 }
 \value{
 An object of class \code{et_lfo_truncation}.

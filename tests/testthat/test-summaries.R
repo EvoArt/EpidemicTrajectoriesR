@@ -43,7 +43,8 @@ test_that("aggregate_records captures the pieces, including the guard", {
   expect_equal(r$array, "n_alive")
   expect_equal(r$op, "+")
   expect_equal(r$guard, "data.g[i, t] > 0")
-  expect_equal(r$contrib, "(state != :D)")
+  # A plain function receives the integer code, so the name is emitted as one.
+  expect_equal(r$contrib, "(state != 4)")
 })
 
 test_that("a derived array is emitted as a reversible function, guard intact", {
@@ -55,9 +56,9 @@ test_that("a derived array is emitted as a reversible function, guard intact", {
   expect_match(src, "if data.g[i, t] > 0", fixed = TRUE)
   # Both directions, and the array reached through `data.aggregates` -- the
   # qualification `@aggregate` would otherwise have done.
-  expect_match(src, "data.aggregates.n_alive[data.g[i, t], t] += (state != :D)",
+  expect_match(src, "data.aggregates.n_alive[data.g[i, t], t] += (state != 4)",
                fixed = TRUE)
-  expect_match(src, "data.aggregates.n_alive[data.g[i, t], t] -= (state != :D)",
+  expect_match(src, "data.aggregates.n_alive[data.g[i, t], t] -= (state != 4)",
                fixed = TRUE)
 })
 
@@ -96,6 +97,12 @@ test_that("a hand-written summary keeps its own body and gets ET's signature", {
   # resolves to its index, not to a Symbol: `:E` there would compare an Int to a
   # Symbol and never match, with no error.
   expect_match(r$src, "X[t + 1, i] == 2", fixed = TRUE)
+  # And `state` too: ET passes the integer code to a plain summary function.
+  # Only the @aggregate macro turns `state == :S` into a code comparison, so a
+  # Symbol here would never match: the totals would stay zero, and the
+  # closed-form coupling built on them would weigh nothing, without an error.
+  expect_match(r$src, "(state == 1) && (X[t + 1, i] == 2)", fixed = TRUE)
+  expect_false(grepl("state == :S", r$src, fixed = TRUE))
 })
 
 test_that("qualification is word-anchored, so a short name cannot corrupt others", {
@@ -175,6 +182,14 @@ test_that("an all-derived declaration still uses the macro", {
   src <- EpidemicTrajectoriesR:::aggregate_src(a)
   expect_match(src, "@aggregate STATES begin", fixed = TRUE)
   expect_match(src, "@array n Int (2, 2)", fixed = TRUE)
+})
+
+test_that("in a plain function, a state name compared against `state` is a CODE", {
+  ctx <- EpidemicTrajectoriesR:::new_ctx(state_syms = TRUE, state_codes = TRUE,
+                                         states = c("S", "E", "I", "D"))
+  tr <- EpidemicTrajectoriesR:::et_transpile_expr
+  expect_equal(tr(quote(state == "I"), ctx), "state == 3")
+  expect_equal(tr(quote("D" != state), ctx), "4 != state")
 })
 
 test_that("a state name compared against the trajectory becomes its CODE", {

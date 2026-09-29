@@ -28,6 +28,10 @@
 et_check_depends <- function(model, blocks = list(), factor = 0.7, x_init = NULL,
                              tol = 1e-8) {
   et_require_session()
+  if (is_marginal(model) && !is.null(x_init)) {
+    stop("et_check_depends(): a marginal-likelihood model takes no `x_init`.",
+         call. = FALSE)
+  }
   gen <- et_julia_source(model, blocks)
   mod <- et_load_module(gen)
 
@@ -46,6 +50,7 @@ et_check_depends <- function(model, blocks = list(), factor = 0.7, x_init = NULL
   has_obs <- !is.null(model$data$observation_process) ||
              !is.null(model$data$observation_weight)
   if (!has_obs) terms <- "epidemic"
+  if (is_marginal(model)) terms <- "marginal"
 
   rows <- list()
   for (par in names(raw)) {

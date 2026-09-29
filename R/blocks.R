@@ -61,16 +61,22 @@ et_hmc <- function(vars, n_steps = 15, step_size = NULL) {
 #'   metric learns correlations between parameters, at the cost of estimating
 #'   many more entries during warm-up, worth it when the posterior is strongly
 #'   correlated and you can afford a long warm-up.
+#' @param jitter Redraw the number of leapfrog steps uniformly from
+#'   `1:n_steps` at every iteration instead of fixing it. A fixed length can
+#'   resonate with a periodic posterior and crawl; jittering breaks that, and
+#'   costs `(n_steps + 1) / 2` gradients per iteration on average, so pair it
+#'   with a larger `n_steps` (e.g. 30 for the cost of a fixed 15).
 #' @return An `et_block`.
 #' @seealso [et_hmc()] for a fixed metric you supply yourself, [et_nuts()] for
 #'   tree-doubling with an adaptive trajectory length.
 #' @export
 et_adaptive_hmc <- function(vars, target_accept = 0.8, n_steps = 15,
-                            metric = c("diagonal", "dense", "unit")) {
+                            metric = c("diagonal", "dense", "unit"),
+                            jitter = FALSE) {
   metric <- match.arg(metric)
   new_block("adaptive_hmc", as.character(vars),
             target_accept = target_accept, n_steps = as.integer(n_steps),
-            metric = metric)
+            metric = metric, jitter = isTRUE(jitter))
 }
 
 #' The latent-trajectory block, resampled by iFFBS.
@@ -148,13 +154,20 @@ et_conjugate_test_sensitivity <- function(name, y, infected_state,
 #' @param dead_state Name of the dead state.
 #' @param n Number of probabilities (e.g. seasons).
 #' @param prior `c(a, b)`.
+#' @param available Optional predicate `(X, data, i, t)`: which live cells count
+#'   as a chance to be caught. Defaults to every live cell in the sampling
+#'   period. It must agree with the capture factor of the observation weight:
+#'   if that factor is neutral before an individual's first capture (the usual
+#'   way of conditioning on entry), those cells must not be counted here either.
 #' @return An `et_block`.
 #' @export
 et_conjugate_capture_prob <- function(name, caught, effort, group, index,
-                                      dead_state, n, prior = c(1, 1)) {
+                                      dead_state, n, prior = c(1, 1),
+                                      available = NULL) {
   new_block("capture_prob", name, caught = caught, effort = effort,
             group = group, index = index, dead_state = dead_state,
-            n = as.integer(n), prior = as.numeric(prior))
+            n = as.integer(n), prior = as.numeric(prior),
+            available = available)
 }
 
 #' Conjugate Dirichlet kernel for the initial-state mixing of entrants.
@@ -218,6 +231,21 @@ resolve_blocks <- function(model, blocks) {
     }
   }
   is_traj <- vapply(blocks, function(b) b$kind == "iffbs", logical(1))
+  if (is_marginal(model)) {
+    # Nothing to resample and nothing to condition on: the trajectory is summed
+    # out inside the likelihood. A kernel that reads a sampled X would be
+    # conditioning on a variable the model no longer has.
+    bad <- vapply(blocks, function(b)
+      !(b$kind %in% c("nuts", "hmc", "adaptive_hmc", "julia")), logical(1))
+    if (any(bad)) {
+      stop("a model with likelihood = \"marginal\" has no latent trajectory, ",
+           "so it takes no iFFBS block and no conjugate kernel (",
+           paste(unique(vapply(blocks[bad], function(b) b$kind, character(1))),
+                 collapse = ", "),
+           "). Sample every parameter with et_nuts()/et_hmc()/",
+           "et_adaptive_hmc().", call. = FALSE)
+    }
+  }
   traj <- if (any(is_traj)) blocks[[which(is_traj)[1]]] else et_iffbs()
   if (sum(is_traj) > 1L) {
     stop("more than one iFFBS block was given; there is one trajectory.",
@@ -257,5 +285,6 @@ resolve_blocks <- function(model, blocks) {
   if (length(leftover)) {
     rest <- c(rest, list(et_nuts(leftover)))
   }
+  if (is_marginal(model)) return(rest)
   c(rest, list(traj))
 }

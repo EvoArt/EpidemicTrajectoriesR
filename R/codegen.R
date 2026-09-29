@@ -87,10 +87,17 @@ generate_module <- function(model, blocks, module_name) {
   obs_reads <- character(); obs_opaque <- FALSE
   fn_src <- character()
 
+  # Shared step values: transpiled first, since every rate that reads `shared`
+  # depends on whatever they read.
+  shared <- shared_role(d$transitions$shared, "et_shared", helpers)
+  fn_src <- c(fn_src, shared$src)
+  epi_opaque <- epi_opaque || shared$opaque
+  rate_role <- if (is.null(shared$name)) "rate" else "rate_shared"
+
   rate_names <- character()
   for (tr in d$transitions$transitions) {
     nm <- sprintf("et_rate_%s_%s", tr$from, tr$to)
-    r <- et_transpile_role(tr$rate, "rate", nm, helpers)
+    r <- et_transpile_role(tr$rate, rate_role, nm, helpers, shared$reads)
     fn_src <- c(fn_src, r$src)
     epi_reads <- union(epi_reads, r$reads); epi_opaque <- epi_opaque || r$opaque
     rate_names[paste0(tr$from, "->", tr$to)] <- nm
@@ -98,7 +105,9 @@ generate_module <- function(model, blocks, module_name) {
   surv_name <- NULL
   if (!is.null(d$transitions$survival)) {
     surv_name <- "et_survival_fn"
-    r <- et_transpile_role(d$transitions$survival$fn, "survival", surv_name, helpers)
+    r <- et_transpile_role(d$transitions$survival$fn,
+                           if (is.null(shared$name)) "survival" else "survival_shared",
+                           surv_name, helpers, shared$reads)
     fn_src <- c(fn_src, r$src)
     epi_reads <- union(epi_reads, r$reads); epi_opaque <- epi_opaque || r$opaque
   }
@@ -119,12 +128,16 @@ generate_module <- function(model, blocks, module_name) {
     obs_reads <- union(obs_reads, r$reads); obs_opaque <- obs_opaque || r$opaque
   }
   obs_weight_name <- NULL
+  obs_shared <- shared_role(d$observation_shared, "et_obs_shared", helpers)
+  fn_src <- c(fn_src, obs_shared$src)
   if (!is.null(d$observation_weight)) {
     obs_weight_name <- "et_obs_weight"
-    r <- et_transpile_role(d$observation_weight, "obs_weight", obs_weight_name,
-                           helpers)
+    r <- et_transpile_role(d$observation_weight,
+                           if (is.null(obs_shared$name)) "obs_weight" else "obs_weight_shared",
+                           obs_weight_name, helpers, obs_shared$reads)
     fn_src <- c(fn_src, r$src)
-    obs_reads <- union(obs_reads, r$reads); obs_opaque <- obs_opaque || r$opaque
+    obs_reads <- union(obs_reads, r$reads)
+    obs_opaque <- obs_opaque || r$opaque || obs_shared$opaque
   }
 
   # The likelihood's own observation factor, when it differs from the filter's.
@@ -158,6 +171,10 @@ generate_module <- function(model, blocks, module_name) {
   # which is never differentiated. Its reads are not added to `depends`, because
   # `epidemic_loglik` never sees it.
   coupling_names <- NULL
+  if (!is.null(d$coupling_transitions$shared)) {
+    stop("et_data(): `coupling_transitions` with its own `shared` is not supported; ",
+         "write its rates without it.", call. = FALSE)
+  }
   if (!is.null(d$coupling_transitions)) {
     coupling_names <- character()
     for (tr in d$coupling_transitions$transitions) {
@@ -199,7 +216,8 @@ generate_module <- function(model, blocks, module_name) {
 
   # --- spec blocks -----------------------------------------------------------
   states_src <- sprintf("const STATES = %s", julia_symbol_vector(states))
-  trans_src <- transitions_src("TRANS", d$transitions, rate_names, surv_name)
+  trans_src <- transitions_src("TRANS", d$transitions, rate_names, surv_name,
+                               shared$name)
   coupling_src <- if (!is.null(coupling_names)) {
     transitions_src("TRANS_COUPLING", d$coupling_transitions, coupling_names,
                     if (!is.null(d$coupling_transitions$survival))
@@ -228,7 +246,8 @@ generate_module <- function(model, blocks, module_name) {
   }
   aggs_src <- aggregate_src(agg)
   data_src <- data_src_for(d, obs_process_name, obs_weight_name,
-                           !is.null(coupling_names), summary_names)
+                           !is.null(coupling_names), summary_names,
+                           obs_shared$name)
 
   # Each artefact is written as a function of the data and then applied to
   # DATA. A normal fit uses the constants. A leave-future-out refit has to
@@ -250,7 +269,19 @@ generate_module <- function(model, blocks, module_name) {
       lik_weight_name)
     else "et_obsloglik_for(DATA) = epidemic_obs_loglik(DATA)",
     "\nconst OBSLOGLIK = et_obsloglik_for(DATA)")
-  latent_src <- paste0(
+  marginal <- is_marginal(model)
+  latent_src <- if (marginal) paste0(
+    # The trajectories are summed out, so the sampler has no latent block. The
+    # `nothing` keeps et_sampler_for()'s signature the same in both modes.
+    "et_marginal_for(DATA; threads=1) = epidemic_marginal_loglik(DATA; threads)",
+    "\nconst MARGINAL = et_marginal_for(DATA)",
+    # Individuals are independent, so under forward mode (and in plain
+    # evaluation) their forward passes run on every thread the session has.
+    # Reverse-mode backends get one: Mooncake does not follow tasks.
+    "\net_marginal_threads(adtype) = adtype isa ADTypes.AutoForwardDiff ? Threads.nthreads() : 1",
+    "\net_latent_for(DATA) = nothing",
+    "\nconst LATENT! = nothing")
+  else paste0(
     sprintf("et_latent_for(DATA) = epidemic_latent_sampler(DATA%s)",
             if (isTRUE(traj_block(blocks)$mh)) "; mh=true" else ""),
     "\nconst LATENT! = et_latent_for(DATA)")
@@ -260,13 +291,18 @@ generate_module <- function(model, blocks, module_name) {
              else c(expand_to_sampled(epi_reads, model), "X")
   dep_obs <- if (obs_opaque) NULL
              else c(expand_to_sampled(obs_reads, model), "X")
-  model_src <- pb_model_src(model, has_obs, dep_epi, dep_obs)
+  # One term carries both halves once X is summed out, so it depends on the
+  # union of what the rates, the starting state and the observations read.
+  dep_marginal <- if (epi_opaque || obs_opaque) NULL
+                  else expand_to_sampled(union(epi_reads, obs_reads), model)
+  model_src <- if (marginal) pb_marginal_model_src(model, dep_marginal)
+               else pb_model_src(model, has_obs, dep_epi, dep_obs)
   placeholder_src <- placeholder_defs(model)
 
   # --- sampler and runner ----------------------------------------------------
   gibbs_src <- gibbs_src_for(model, blocks)
-  run_src <- run_src_for(model, has_obs)
-  population_src <- population_src_for(model, has_obs)
+  run_src <- if (marginal) run_src_marginal(model) else run_src_for(model, has_obs)
+  population_src <- if (marginal) NULL else population_src_for(model, has_obs)
 
   # no timestamp. The module name is a hash of this text, so a header that
   # varied with the clock would make every generation a fresh module and force a
@@ -284,27 +320,45 @@ generate_module <- function(model, blocks, module_name) {
     sprintf("module %s\n", module_name),
     join_blocks(
       julia_usings(),
-      section("payload from R", bindings),
+      section("payload from R", qualify_base(bindings)),
       section("state space", states_src),
       section("user functions", c(helper_src, fn_src)),
       section("transitions", c(trans_src, coupling_src)),
       section("aggregates", c(summary_src, aggs_src)),
       section("data", data_src),
-      section("generated artefacts", c(loglik_src, obsll_src, latent_src)),
+      section("generated artefacts",
+              qualify_base(c(loglik_src, obsll_src, latent_src))),
       section("placeholders for conjugate-owned parameters", placeholder_src),
       section("the model", model_src),
       section("sampler", gibbs_src),
-      section("runner", run_src),
-      section("population", population_src),
-      section("depends= validator", check_src_for(model, has_obs)),
-      section("parameter draws from R", unflatten_src(model)),
-      extract_helper_src()
+      section("runner", qualify_base(run_src)),
+      section("population", qualify_base(population_src)),
+      section("depends= validator", qualify_base(
+        if (marginal) check_src_marginal(model) else check_src_for(model, has_obs))),
+      section("parameter draws from R", qualify_base(unflatten_src(model))),
+      qualify_base(extract_helper_src())
     ),
     sprintf("\n\nend # module %s\n", module_name))
 
   list(src = src, payload = payload, module = module_name, blocks = blocks,
-       depends = list(epidemic = dep_epi, observation = dep_obs),
+       depends = if (marginal) list(marginal = dep_marginal)
+                 else list(epidemic = dep_epi, observation = dep_obs),
        model = model)
+}
+
+# Extras are bound in the module under their own names, and a natural name for
+# a covariate -- `first`, `size`, `time` -- is also a Base function the
+# generated code calls. Package-written sections therefore call Base
+# explicitly. User-transpiled sections are left alone: a helper the user named
+# `first` must still be theirs.
+.base_calls <- c("first", "last", "length", "size", "vec", "time", "collect",
+                 "fill", "zeros", "ones", "max", "min", "axes", "eachindex",
+                 "reduce", "string", "join", "merge", "isempty", "div",
+                 "enumerate", "copy", "sum", "count", "keys", "values",
+                 "getproperty", "isdefined", "convert", "error")
+qualify_base <- function(src) {
+  pat <- sprintf("(?<![A-Za-z0-9_.:!])(%s)\\(", paste(.base_calls, collapse = "|"))
+  gsub(pat, "Base.\\1(", src, perl = TRUE)
 }
 
 section <- function(title, body) {
@@ -376,8 +430,17 @@ affected_builder_src <- function(n_timepoints) {
 
 # ---- spec blocks ------------------------------------------------------------
 
-transitions_src <- function(const_name, spec, rate_names, surv_name) {
-  lines <- character()
+# A shared step function, transpiled under `name`, or nothing when there is none.
+shared_role <- function(f, name, helpers) {
+  if (is.null(f)) return(list(name = NULL, src = character(), reads = character(),
+                              opaque = FALSE))
+  r <- et_transpile_role(f, "shared", name, helpers)
+  list(name = name, src = r$src, reads = r$reads, opaque = r$opaque)
+}
+
+transitions_src <- function(const_name, spec, rate_names, surv_name,
+                            shared_name = NULL) {
+  lines <- if (!is.null(shared_name)) sprintf("@shared %s", shared_name) else character()
   if (!is.null(spec$survival)) {
     lines <- c(lines, sprintf("@survival %s death=%s", surv_name,
                               julia_symbol(spec$survival$death)))
@@ -461,7 +524,7 @@ qualify_aggregates <- function(src, array_names) {
 }
 
 data_src_for <- function(d, obs_process_name, obs_weight_name, has_coupling,
-                         summary_names = character()) {
+                         summary_names = character(), obs_shared_name = NULL) {
   kw <- c(
     sprintf("n_individuals=%s", julia_int(d$n_individuals)),
     sprintf("n_timepoints=%s", julia_int(d$n_timepoints)),
@@ -477,6 +540,7 @@ data_src_for <- function(d, obs_process_name, obs_weight_name, has_coupling,
     if (!is.null(d$group)) "group=group",
     if (!is.null(obs_process_name)) sprintf("observation_process=%s", obs_process_name),
     if (!is.null(obs_weight_name)) sprintf("observation_weight=%s", obs_weight_name),
+    if (!is.null(obs_shared_name)) sprintf("observation_shared=%s", obs_shared_name),
     if (!is.null(d$sampling_period)) "sampling_period=sampling_period",
     if (inherits(d$affected_individuals, "et_affected"))
       "affected_individuals=affected_individuals"
@@ -570,6 +634,33 @@ pb_model_src <- function(model, has_obs, dep_epi, dep_obs) {
                  indent(paste(lines, collapse = "\n"))))
 }
 
+# The collapsed model: priors, deterministics, and ONE likelihood term, the
+# marginal over every hidden trajectory. No `X` site and so no latent block:
+# the forward recursion inside `marginal_fn` is deterministic integration,
+# which is safe inside the gradient where a stochastic latent update is not.
+pb_marginal_model_src <- function(model, dep) {
+  lines <- character()
+  for (nm in model$par_names) {
+    lines <- c(lines, sprintf("%s ~ %s", nm, par_dist_src(nm, model$parameters[[nm]])))
+  }
+  for (nm in names(model$derived)) {
+    lines <- c(lines, sprintf("%s := %s", nm,
+                              et_transpile_expr(model$derived[[nm]], new_ctx())))
+  }
+  pars <- c(model$par_names, names(model$derived))
+  lines <- c(lines, sprintf("pars = (; %s)",
+                            paste(sprintf("%s=%s", pars, pars), collapse = ", ")))
+  lines <- c(lines, sprintf("@addlogprob! marginal_fn(pars, data)%s",
+                            if (is.null(dep)) "" else
+                              paste0("  depends=", julia_symbol_tuple(dep))))
+  paste0(
+    "# The hidden trajectories are summed out by the forward algorithm, so this\n",
+    "# one term is the whole likelihood: starting state, transitions AND\n",
+    "# observations. `depends=` is derived from every body it evaluates.\n",
+    sprintf("@model function et_the_model(data, marginal_fn)\n%s\nend",
+            indent(paste(lines, collapse = "\n"))))
+}
+
 # ---- sampler ----------------------------------------------------------------
 
 traj_block <- function(blocks) {
@@ -614,9 +705,9 @@ block_entry <- function(model, b) {
     nuts = sprintf("%s => NUTS(%s)", key, julia_float(b$target_accept)),
     hmc = sprintf("%s => %s", key, hmc_kernel_src(model, b)),
     adaptive_hmc = sprintf(
-      "%s => AdaptiveHMC(%s; n_leapfrog=%s, metric=%s)",
+      "%s => AdaptiveHMC(%s; n_leapfrog=%s, metric=%s%s)",
       key, julia_float(b$target_accept), julia_int(b$n_steps),
-      julia_symbol(b$metric)),
+      julia_symbol(b$metric), if (isTRUE(b$jitter)) ", jitter=true" else ""),
     iffbs = sprintf("%s => iffbs_kernel(LATENT!; params=et_params)", key),
     conjugate = sprintf("%s => %s", key, conjugate_src(model, b)),
     test_sensitivity = sprintf(
@@ -625,10 +716,12 @@ block_entry <- function(model, b) {
       julia_float(b$prior[1]), julia_float(b$prior[2])),
     capture_prob = sprintf(paste0(
       "%s => capture_prob_kernel(%s; caught=%s, effort=%s, group=%s, index=%s,\n",
-      "        dead_state=%s, n=%s, prior=(%s, %s))"),
+      "        dead_state=%s, n=%s, prior=(%s, %s)%s)"),
       key, julia_symbol(b$vars), b$caught, b$effort, b$group, b$index,
       state_index(model, b$dead_state), julia_int(b$n),
-      julia_float(b$prior[1]), julia_float(b$prior[2])),
+      julia_float(b$prior[1]), julia_float(b$prior[2]),
+      if (is.null(b$available)) "" else
+        paste0(",\n        available=", eligible_src(b$available))),
     initial_state = sprintf(
       "%s => initial_state_kernel(%s; at=%s, eligible=%s, states=(%s), prior=%s, n=%s)",
       key, julia_symbol(b$vars), initial_at_src(b),
@@ -941,6 +1034,70 @@ check_src_for <- function(model, has_obs) {
     if (has_obs) "OBSLOGLIK(p0, DATA, X0)" else "0.0",
     julia_symbol_vector(model$par_names),
     if (has_obs) "OBSLOGLIK(p, DATA, X0)" else "0.0")
+}
+
+# The runner for a collapsed model. Same entry points and keyword signatures as
+# run_src_for(), so et_sample() and the LFO injection drive both alike, but
+# there is no trajectory to start, keep or stream: `x_init` and `save_x` must
+# be `nothing` (R refuses them before they get here).
+run_src_marginal <- function(model) {
+  init_parts <- vapply(model$par_names, function(nm) {
+    p <- model$parameters[[nm]]
+    val <- if (p$n > 1L) julia_vector(p$init, "Float64") else julia_float(p$init)
+    sprintf("%s=%s", nm, val)
+  }, character(1))
+  sprintf(paste0(
+    "const INIT_PARS = (; %s)\n\n",
+    "# Nothing to prepare: no trajectory, so no aggregates to bring into line.\n",
+    "et_prepare!(X0) = X0\n\n",
+    "# Once per module, before any fit: the numeric half of the independence\n",
+    "# check. A rate that reads an aggregate, or a callback that reads X, would\n",
+    "# make the marginal likelihood silently wrong; this is where it is caught.\n",
+    "const _ET_INDEPENDENT = Ref(false)\n",
+    "function et_check_independent!(data=DATA)\n",
+    "    _ET_INDEPENDENT[] && return nothing\n",
+    "    check_independent(et_params(INIT_PARS), data)\n",
+    "    _ET_INDEPENDENT[] = true\n",
+    "    nothing\n",
+    "end\n\n",
+    "function et_run(; n_sweeps, n_burn=0, n_adapts=0, seed=1, x_init=nothing,\n",
+    "                  adtype=ADTypes.AutoForwardDiff(), save_x=nothing,\n",
+    "                  save_every::Int=100)\n",
+    "    x_init === nothing && save_x === nothing ||\n",
+    "        error(\"a marginal-likelihood model has no trajectory to start or save\")\n",
+    "    et_check_independent!()\n",
+    "    m = et_the_model(DATA, et_marginal_for(DATA; threads=et_marginal_threads(adtype)))\n",
+    "    t0 = time()\n",
+    "    chn = AbstractMCMC.sample(StableRNG(seed), m, SPL, n_sweeps;\n",
+    "                              init=INIT_PARS, n_adapts=n_adapts, adtype=adtype,\n",
+    "                              discard_initial=n_burn)\n",
+    "    out = _et_extract(chn, %s)\n",
+    "    out[\"_elapsed\"] = time() - t0\n",
+    "    out\n",
+    "end\n\n",
+    "# The marginal log likelihood at a parameter set, in total or per individual.\n",
+    "et_marginal_at(v) = MARGINAL(et_params(v), DATA)\n",
+    "et_hmm_logliks_at(v) = Float64.(hmm_logliks(et_params(v), DATA))\n",
+    "et_loglik_at(X0=nothing) = (marginal=et_marginal_at(INIT_PARS),)"),
+    paste(init_parts, collapse = ", "),
+    julia_symbol_vector(model$par_names))
+}
+
+check_src_marginal <- function(model) {
+  sprintf(paste0(
+    "function et_perturb(nm::Symbol, factor)\n",
+    "    v = getproperty(INIT_PARS, nm)\n",
+    "    merge(INIT_PARS, NamedTuple{(nm,)}((v .* factor,)))\n",
+    "end\n\n",
+    "function et_check_depends(; factor=0.7, x_init=nothing)\n",
+    "    base = et_marginal_at(INIT_PARS)\n",
+    "    out = Dict{String,Any}()\n",
+    "    for nm in %s\n",
+    "        out[String(nm)] = Float64[et_marginal_at(et_perturb(nm, factor)) - base]\n",
+    "    end\n",
+    "    out\n",
+    "end"),
+    julia_symbol_vector(model$par_names))
 }
 
 # Chain -> plain arrays. A scalar parameter becomes a length-`n_draws` vector; a

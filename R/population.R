@@ -39,6 +39,7 @@ et_collect <- function(model, blocks = list(), residuals,
                        x_init = NULL, adtype = "forwarddiff",
                        n_keep = 500, thin = NULL, quiet = FALSE) {
   et_require_session()
+  require_augmented(model, "et_collect()")
   if (!is.list(residuals) || !length(residuals)) {
     stop("et_collect(): `residuals` must be a non-empty list.", call. = FALSE)
   }

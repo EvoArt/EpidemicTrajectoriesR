@@ -40,6 +40,11 @@ et_sample <- function(model, blocks = list(), n_sweeps = 1000, n_burn = 0,
                       adtype = "forwarddiff", save_x = NULL, save_every = 100,
                       convert_x = TRUE, keep_source = NULL, quiet = FALSE) {
   et_require_session()
+  if (is_marginal(model) && (!is.null(x_init) || !is.null(save_x))) {
+    stop("et_sample(): a model with likelihood = \"marginal\" has no ",
+         "trajectory, so there is nothing to start from (`x_init`) or to save ",
+         "(`save_x`).", call. = FALSE)
+  }
   gen <- et_julia_source(model, blocks)
   mod <- et_load_module(gen, keep_source)
 
@@ -74,7 +79,7 @@ et_sample <- function(model, blocks = list(), n_sweeps = 1000, n_burn = 0,
   call <- sprintf(
     "%s.et_run(; n_sweeps=%s, n_burn=%s, n_adapts=%s, seed=%s, x_init=%s, adtype=%s, save_x=%s, save_every=%s)",
     mod, julia_int(n_sweeps), julia_int(n_burn), julia_int(n_adapts),
-    julia_int(seed), x_arg, adtype_to_julia(adtype),
+    julia_int(seed), x_arg, adtype_to_julia(default_adtype(model, adtype)),
     if (is.null(julia_save_x)) "nothing" else julia_string(julia_path(julia_save_x)),
     julia_int(save_every))
   raw <- JuliaCall::julia_eval(call)
@@ -167,10 +172,14 @@ restore_shapes <- function(raw, model) {
 #'   all.
 #' @param x_init Optional starting trajectory.
 #' @return A named numeric vector with an `epidemic` and (if any) `observation`
-#'   entry.
+#'   entry; for a `likelihood = "marginal"` model, the one `marginal` entry.
 #' @export
 et_loglik <- function(model, blocks = list(), x_init = NULL) {
   et_require_session()
+  if (is_marginal(model) && !is.null(x_init)) {
+    stop("et_loglik(): a marginal-likelihood model takes no `x_init`; the ",
+         "trajectories are summed out.", call. = FALSE)
+  }
   gen <- et_julia_source(model, blocks)
   mod <- et_load_module(gen)
   arg <- ""
@@ -219,34 +228,69 @@ et_simulate <- function(model, pars = NULL, seed = 1, blocks = list()) {
   }
   gen <- et_julia_source(model, blocks)
   mod <- et_load_module(gen)
+  et_simulate_inject(mod)
+  out <- JuliaCall::julia_eval(sprintf(
+    "%s.et_simulate_at(%s; seed=%s)", mod, pars_nt_src(model, pars, "et_simulate()"),
+    julia_int(seed)))
+  matrix(as.integer(out), nrow = model$data$n_timepoints)
+}
 
+# A parameter NamedTuple literal: each parameter's `init`, overridden by `pars`.
+pars_nt_src <- function(model, pars, caller) {
   vals <- lapply(model$par_names, function(nm) model$parameters[[nm]]$init)
   names(vals) <- model$par_names
   if (!is.null(pars)) {
     unknown <- setdiff(names(pars), model$par_names)
     if (length(unknown)) {
-      stop("et_simulate(): unknown parameter(s): ",
-           paste(unknown, collapse = ", "), ". The model declares: ",
-           paste(model$par_names, collapse = ", "), ".", call. = FALSE)
+      stop(caller, ": unknown parameter(s): ", paste(unknown, collapse = ", "),
+           ". The model declares: ", paste(model$par_names, collapse = ", "),
+           ".", call. = FALSE)
     }
     for (nm in names(pars)) {
       if (length(pars[[nm]]) != length(vals[[nm]])) {
-        stop("et_simulate(): '", nm, "' has length ", length(pars[[nm]]),
+        stop(caller, ": '", nm, "' has length ", length(pars[[nm]]),
              " but the model declares ", length(vals[[nm]]), ".", call. = FALSE)
       }
       vals[[nm]] <- as.numeric(pars[[nm]])
     }
   }
+  sprintf("(; %s)", paste(sprintf("%s=%s", names(vals),
+                                  vapply(vals, function(v)
+                                    if (length(v) > 1) julia_vector(v, "Float64")
+                                    else julia_float(v), character(1))),
+                          collapse = ", "))
+}
 
-  et_simulate_inject(mod)
-  nt <- paste(sprintf("%s=%s", names(vals),
-                      vapply(vals, function(v)
-                        if (length(v) > 1) julia_vector(v, "Float64")
-                        else julia_float(v), character(1))),
-              collapse = ", ")
-  out <- JuliaCall::julia_eval(sprintf(
-    "%s.et_simulate_at((; %s); seed=%s)", mod, nt, julia_int(seed)))
-  matrix(as.integer(out), nrow = model$data$n_timepoints)
+#' The marginal log likelihood of a collapsed model.
+#'
+#' For a model built with `et_model(likelihood = "marginal")`: the log
+#' probability of the observations with every hidden trajectory summed out by
+#' the forward algorithm, at a given parameter set. This is the function the
+#' fit samples against, evaluated directly.
+#'
+#' `by_individual = TRUE` returns each individual's own term. An individual
+#' whose observations no hidden path can explain gets `-Inf`, which is the
+#' place to look when the total is `-Inf`.
+#'
+#' @param model An [et_model()] with `likelihood = "marginal"`.
+#' @param pars Named list of parameter values; defaults to each parameter's
+#'   `init`.
+#' @param by_individual Return one value per individual rather than the total.
+#' @return A number, or a numeric vector of length `n_individuals`.
+#' @export
+et_marginal_loglik <- function(model, pars = NULL, by_individual = FALSE) {
+  et_require_session()
+  if (!is_marginal(model)) {
+    stop("et_marginal_loglik(): the model was built with likelihood = ",
+         "\"augmented\". Rebuild it with et_model(..., likelihood = ",
+         "\"marginal\").", call. = FALSE)
+  }
+  gen <- et_julia_source(model)
+  mod <- et_load_module(gen)
+  JuliaCall::julia_eval(sprintf("%s.et_check_independent!()", mod))
+  fn <- if (isTRUE(by_individual)) "et_hmm_logliks_at" else "et_marginal_at"
+  JuliaCall::julia_eval(sprintf("%s.%s(%s)", mod, fn,
+                                pars_nt_src(model, pars, "et_marginal_loglik()")))
 }
 
 # The simulator entry point, injected once per module. Not part of
@@ -259,7 +303,7 @@ et_simulate_inject <- function(mod) {
     "end\n",
     "end\n")
   nm <- paste0(mod, "_sim_src")
-  JuliaCall::julia_assign(nm, src)
+  JuliaCall::julia_assign(nm, qualify_base(src))
   JuliaCall::julia_command(sprintf("Base.include_string(%s, Main.%s)", mod, nm))
 }
 
@@ -277,6 +321,7 @@ et_simulate_inject <- function(mod) {
 #' @export
 et_iffbs_sweep <- function(model, x_init, blocks = list(), seed = 1) {
   et_require_session()
+  require_augmented(model, "et_iffbs_sweep()")
   gen <- et_julia_source(model, blocks)
   mod <- et_load_module(gen)
   x_init <- as.matrix(x_init); storage.mode(x_init) <- "integer"

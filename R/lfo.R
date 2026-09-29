@@ -29,11 +29,18 @@
 #'   at that cutoff should see. The generated module's `DATA` is in scope.
 #' @param strict Error on an undeclared, time-shaped extra (the default and the
 #'   safe choice).
+#' @param known_from Optional name of an `extras` vector giving, per individual,
+#'   the first time the study knew it existed. Needed when a sampling period
+#'   opens before the individual is first observed (an animal born into a
+#'   watched group but not caught until later). An individual not yet known at
+#'   a cutoff is left out of that cutoff's fit, and is neither scored nor
+#'   simulated in its window. Defaults to the start of each sampling period.
 #' @return An object of class `et_lfo_truncation`.
 #' @export
 et_lfo_truncation <- function(clamp = character(), filter = character(),
                               copy = character(), keep = character(),
-                              custom = list(), strict = TRUE) {
+                              custom = list(), strict = TRUE,
+                              known_from = NULL) {
   if (length(custom)) {
     if (is.null(names(custom)) || any(!nzchar(names(custom))) ||
         !all(vapply(custom, inherits, logical(1), "et_julia"))) {
@@ -42,8 +49,16 @@ et_lfo_truncation <- function(clamp = character(), filter = character(),
     }
     check_julia_name(names(custom), "extras name")
   }
+  if (!is.null(known_from)) {
+    if (!is.character(known_from) || length(known_from) != 1L) {
+      stop("et_lfo_truncation(): `known_from` must be one extras name.",
+           call. = FALSE)
+    }
+    check_julia_name(known_from, "extras name")
+  }
   structure(list(clamp = clamp, filter = filter, copy = copy, keep = keep,
-                 custom = custom, strict = isTRUE(strict)),
+                 custom = custom, strict = isTRUE(strict),
+                 known_from = known_from),
             class = "et_lfo_truncation")
 }
 
@@ -54,6 +69,7 @@ print.et_lfo_truncation <- function(x, ...) {
     if (length(x[[r]])) cat("  ", r, ": ", paste(x[[r]], collapse = ", "), "\n", sep = "")
   }
   if (length(x$custom)) cat("  custom: ", paste(names(x$custom), collapse = ", "), "\n", sep = "")
+  if (!is.null(x$known_from)) cat("  known from: ", x$known_from, "\n", sep = "")
   invisible(x)
 }
 
@@ -72,6 +88,9 @@ truncation_src <- function(plan) {
     parts <- c(parts, sprintf("custom=(%s,)", paste(rules, collapse = ", ")))
   }
   parts <- c(parts, sprintf("strict=%s", if (plan$strict) "true" else "false"))
+  if (!is.null(plan$known_from)) {
+    parts <- c(parts, sprintf("known_from=%s", julia_symbol(plan$known_from)))
+  }
   sprintf("truncation(%s)", paste(parts, collapse = ", "))
 }
 
@@ -275,33 +294,11 @@ cr_test_src <- function(test, infected) {
 # the honest answer is 0.4*0.5 + 0.6 = 0.8, and forcing survival on the strength
 # of a later capture leaves 0.2.) So condition only on y_{(t+1):(t+M)}.
 #
-# The bound is the end of the window step `t` belongs to, not `t + M - 1`: a
-# fixed lookahead from each step reaches past the window for every step after
-# the first. ET calls the constraint as `known_present(i, t)`, without the
-# cutoff, so the end has to be recoverable from `t` alone. With non-overlapping
-# windows (stride >= M) it is: step `t` lies in the window of cutoff
-# L + stride * floor((t - L - 1) / stride), which ends M steps later.
-#
-# `_et_seen_to_end` is an n_timepoints x n_individuals Bool: is there a capture
-# at some u in [t, end of t's window]? Precomputed per (L, stride, M), so the
-# constraint is a lookup.
-cr_seen_name <- function(cr, L, M, stride)
-  sprintf("_et_seen_to_end_%s_L%s_S%s_M%s", cr$caught, julia_int(L),
-          julia_int(stride), julia_int(M))
-
-cr_known_present <- function(cr, L, M, stride) {
-  et_julia(sprintf("%s[t, i]", cr_seen_name(cr, L, M, stride)))
-}
-
-cr_seen_within_src <- function(cr, L, M, stride) {
-  sprintf(paste0(
-    "const %s = let y = DATA.%s, T = DATA.n_timepoints\n",
-    "    stop = [t <= %s ? t : %s + fld(t - %s - 1, %s) * %s + %s for t in 1:T]\n",
-    "    [any(==(1), @view y[t:min(stop[t], T), i])\n",
-    "     for t in 1:T, i in 1:DATA.n_individuals]\n",
-    "end"), cr_seen_name(cr, L, M, stride), cr$caught,
-    julia_int(L), julia_int(L), julia_int(L), julia_int(stride),
-    julia_int(stride), julia_int(M))
+# ET passes the window's last timepoint as `last_t`, so the bound holds whether
+# or not windows overlap.
+cr_known_present <- function(cr) {
+  caught <- if (is.character(cr)) cr else cr$caught
+  et_julia(sprintf("any(==(1), @view DATA.%s[t:last_t, i])", caught))
 }
 
 #' A leave-future-out scoring specification.
@@ -314,12 +311,15 @@ cr_seen_within_src <- function(cr, L, M, stride) {
 #' become one at a time); `data` is the (possibly truncated) `DATA` object;
 #' state codes are 1-based positions in the model's state vector.
 #'
-#' @param cell_logdensity Either an [et_capture_recapture()] (the usual case)
-#'   which also derives `known_present` for you, or an [et_julia()] wrapping a
-#'   Julia function `(model, data, X, i, t) -> Float64`: individual `i`'s
-#'   observation log-density at `t` given the simulated states `X`. Return
-#'   `-Inf` for an inadmissible trajectory; it is charged to that individual's
-#'   own cell, never to the whole window.
+#' @param cell_logdensity How a simulated state is scored against an
+#'   observation. `NULL` (the default) uses the model's own observation weight,
+#'   which keeps the score and the fitted model on one observation model and is
+#'   what `method = "exact_hmm"` scores with too. Otherwise an
+#'   [et_capture_recapture()], which also derives `known_present` for you, or
+#'   an [et_julia()] wrapping a Julia function `(model, data, X, i, t) ->
+#'   Float64`: individual `i`'s observation log-density at `t` given the
+#'   simulated states `X`. Return `-Inf` for an inadmissible trajectory; it is
+#'   charged to that individual's own cell, never to the whole window.
 #' @param truncation An [et_lfo_truncation()].
 #' @param is_informative Optional [et_julia()] wrapping
 #'   `(data, i, t) -> Bool`: whether that cell's density actually depends on the
@@ -352,28 +352,97 @@ cr_seen_within_src <- function(cr, L, M, stride) {
 #'   That bound matters. A capture after the window's last occasion is outside
 #'   the block being scored, and conditioning on it deletes a death branch
 #'   carrying real probability mass: a lost positive contribution that no
-#'   reweighting restores. It needs non-overlapping windows (`stride >= M`).
-#'   Otherwise supply `known_present`, and bound it yourself.
-#' @param known_present Optional [et_julia()] whose body is a function of `i`
-#'   and `t` only: individual `i` is known to be alive at `t`. **`data` is not
-#'   in scope**: ET calls this as `known_present(i, t)`, so reach arrays through
-#'   the generated module's own `DATA`, e.g. `t <= DATA.last_seen[i]`. The
-#'   window's cutoff is not passed either, so a lookahead such as
-#'   `t:(t + M - 1)` runs past the window for every step after the first; bound
-#'   it at the end of the window `t` belongs to. Ignored unless
-#'   `constrain_survival` is `TRUE`.
+#'   reweighting restores. Otherwise supply `known_present`.
+#' @param known_present Who is known to be alive, for `constrain_survival`:
+#'   the name of a 0/1 capture matrix in `extras` (alive at `t` if caught at
+#'   some occasion from `t` to the end of the scored window), or an
+#'   [et_julia()] whose body is a function of `i`, `t` and `last_t`, the
+#'   window's last occasion, e.g. `any(==(1), @view DATA.caught[t:last_t, i])`.
+#'   `data` is not in scope, so reach arrays through the generated module's
+#'   own `DATA`. Never look past `last_t`. Ignored unless `constrain_survival`
+#'   is `TRUE`.
 #' @param n_sim Forward trajectories per posterior draw per window.
 #' @param seed Base RNG seed for the forward simulation.
+#' @param observation_guided Simulate from the observation-guided proposal:
+#'   each animal's next state is drawn in proportion to its move probability
+#'   times how likely its own observations over the rest of the window are
+#'   from that state, and the importance weight is carried with the score.
+#'   The survival constraint is the special case that looks only at whether
+#'   the animal is alive; this one also avoids transient states the data rule
+#'   out, such as a seronegative animal converting before a negative test.
+#'   Not with `constrain_survival`. For a coupled model it corrects only the
+#'   joint score, so et_lfo_cv() then takes `granularity = "joint"` alone.
+#' @param simulate_entrants Whether individuals entering after the cutoff are
+#'   simulated into the forecast, drawn from the starting state at their entry
+#'   time, so that they can affect the cohort's dynamics. That uses entry times
+#'   only later data reveal; `FALSE` fixes the forecast population at the
+#'   cutoff. It matters only for coupled models.
+#' @param method How each posterior draw's predictive density is computed.
+#'
+#'   * `"simulate"` (the default): forward-simulate from the draw's sampled
+#'     state at the cutoff and score with `cell_logdensity`. Works for any
+#'     model.
+#'   * `"exact_hmm"`: for individuals independent given the parameters, sum
+#'     each one's state at the cutoff and its future path out exactly, by the
+#'     forward algorithm, and score with the model's own observation process.
+#'     No forward simulation, so no `cell_logdensity`, `n_sim` or survival
+#'     constraint; the only Monte Carlo error left is the posterior draws'.
+#'     Scores whole forecast blocks, so for `M > 1` it takes the `"joint"` and
+#'     `"by_individual"` granularities.
+#'
+#'   The method and the model's `likelihood` are separate choices: an
+#'   augmented (iFFBS) fit can be scored exactly, and a marginal fit can be
+#'   scored by simulation, its trajectories then drawn afterwards from their
+#'   exact posterior given the training data.
 #' @return An object of class `et_lfo_spec`.
 #' @export
-et_lfo_spec <- function(cell_logdensity, truncation, is_informative = NULL,
+et_lfo_spec <- function(cell_logdensity = NULL, truncation, is_informative = NULL,
                         constrain_survival = FALSE, known_present = NULL,
-                        n_sim = 1L, seed = 13L) {
+                        n_sim = 1L, seed = 13L, simulate_entrants = TRUE,
+                        observation_guided = FALSE,
+                        method = c("simulate", "exact_hmm")) {
+  method <- match.arg(method)
+  if (!inherits(truncation, "et_lfo_truncation")) {
+    stop("et_lfo_spec(): `truncation` must come from et_lfo_truncation().", call. = FALSE)
+  }
+  if (!is.null(is_informative) && !inherits(is_informative, "et_julia")) {
+    stop("et_lfo_spec(): `is_informative` must come from et_julia().", call. = FALSE)
+  }
+  if (method == "exact_hmm") {
+    # Refuse rather than ignore: a run that looks corrected or simulated and is
+    # neither is worse than an error.
+    if (!is.null(cell_logdensity)) {
+      stop("et_lfo_spec(): method = \"exact_hmm\" scores with the model's own ",
+           "observation process; drop `cell_logdensity` so there is only one ",
+           "observation model.", call. = FALSE)
+    }
+    if (isTRUE(constrain_survival) || !is.null(known_present) ||
+        isTRUE(observation_guided)) {
+      stop("et_lfo_spec(): method = \"exact_hmm\" integrates the future ",
+           "exactly, so there is no forward proposal to constrain.", call. = FALSE)
+    }
+    if (as.integer(n_sim) != 1L) {
+      stop("et_lfo_spec(): `n_sim` does not apply to method = \"exact_hmm\".",
+           call. = FALSE)
+    }
+    return(structure(list(method = method, truncation = truncation,
+                          is_informative = is_informative,
+                          cell_logdensity = NULL, known_present = NULL,
+                          capture_recapture = NULL, constrain_survival = FALSE,
+                          n_sim = 1L, seed = as.integer(seed)),
+                     class = "et_lfo_spec"))
+  }
   cr <- if (inherits(cell_logdensity, "et_capture_recapture")) cell_logdensity
-  # A capture-recapture constraint depends on the window length, so it is built
-  # by et_lfo_cv() once M is known -- see cr_known_present().
+  # A capture-recapture score's constraint is built by et_lfo_cv() from the
+  # same capture matrix -- see cr_known_present().
   if (!is.null(cr)) cell_logdensity <- cr_cell_logdensity(cr)
-  if (!inherits(cell_logdensity, "et_julia")) {
+  if (is.character(known_present)) {
+    check_julia_name(known_present, "extras name")
+    known_present <- cr_known_present(known_present)
+  }
+  # NULL means the model's own observation model, filled in by et_lfo_cv()
+  # once the model is known -- see own_cell_logdensity().
+  if (!is.null(cell_logdensity) && !inherits(cell_logdensity, "et_julia")) {
     stop("et_lfo_spec(): `cell_logdensity` must come from et_capture_recapture() ",
          "or et_julia().", call. = FALSE)
   }
@@ -382,31 +451,52 @@ et_lfo_spec <- function(cell_logdensity, truncation, is_informative = NULL,
          "Score with et_capture_recapture(), which derives it, or pass ",
          "`known_present`.", call. = FALSE)
   }
+  if (isTRUE(constrain_survival) && isTRUE(observation_guided)) {
+    stop("et_lfo_spec(): use observation_guided or constrain_survival, not both.",
+         call. = FALSE)
+  }
   if (!isTRUE(constrain_survival)) known_present <- NULL
-  if (!inherits(truncation, "et_lfo_truncation")) {
-    stop("et_lfo_spec(): `truncation` must come from et_lfo_truncation().", call. = FALSE)
-  }
-  if (!is.null(is_informative) && !inherits(is_informative, "et_julia")) {
-    stop("et_lfo_spec(): `is_informative` must come from et_julia().", call. = FALSE)
-  }
   if (!is.null(known_present) && !inherits(known_present, "et_julia")) {
     stop("et_lfo_spec(): `known_present` must come from et_julia().", call. = FALSE)
   }
-  structure(list(cell_logdensity = cell_logdensity, truncation = truncation,
+  structure(list(method = method,
+                 cell_logdensity = cell_logdensity, truncation = truncation,
                  is_informative = is_informative, known_present = known_present,
                  capture_recapture = cr,
                  constrain_survival = isTRUE(constrain_survival),
+                 simulate_entrants = isTRUE(simulate_entrants),
+                 observation_guided = isTRUE(observation_guided),
                  n_sim = as.integer(n_sim), seed = as.integer(seed)),
             class = "et_lfo_spec")
 }
 
 #' @export
 print.et_lfo_spec <- function(x, ...) {
+  if (identical(x$method, "exact_hmm")) {
+    cat("<et_lfo_spec>  exact: hidden states summed out by the forward algorithm\n")
+    return(invisible(x))
+  }
   cat("<et_lfo_spec>  n_sim=", x$n_sim,
       if (isTRUE(x$constrain_survival)) "  survival-constrained"
       else "  naive forward simulation",
       "\n", sep = "")
   invisible(x)
+}
+
+lfo_method <- function(spec) spec$method %||% "simulate"
+
+# The model's own observation weight as a per-cell log density: the same
+# generated function the fit and the exact scorer use.
+own_cell_logdensity <- function(model) {
+  d <- model$data
+  if (!is.null(d$observation_weight)) {
+    return(et_julia("log(data.observation_weight(model, data, X, i, t, X[t, i]))"))
+  }
+  if (!is.null(d$observation_process)) {
+    return(et_julia("log(et_obs_process(model, data, X, i, t)[X[t, i]])"))
+  }
+  stop("et_lfo_cv(): the model has no observation process to score with; ",
+       "give et_lfo_spec() a `cell_logdensity`.", call. = FALSE)
 }
 
 # `LFOSpec(...)` call text. `known_present` expands to the co-gated
@@ -418,13 +508,17 @@ print.et_lfo_spec <- function(x, ...) {
 # with the same cell_logdensity/plan/etc and its own `fit` closure over
 # et_lfo_fit(), which is the one that actually refits this model per cutoff.
 lfo_spec_src <- function(spec, plan_expr) {
+  exact <- lfo_method(spec) == "exact_hmm"
   parts <- c(
     "fit = (train, t) -> error(\"unused placeholder: et_lfo_cv() supplies its own fit\")",
-    sprintf("cell_logdensity = (model, data, X, i, t) -> begin\n%s\nend",
-            indent(spec$cell_logdensity$src)),
+    if (exact) "scorer = ExactHMM()"
+    else sprintf("cell_logdensity = (model, data, X, i, t) -> begin\n%s\nend",
+                 indent(spec$cell_logdensity$src)),
     sprintf("plan = %s", plan_expr),
     sprintf("n_sim = %s", julia_int(spec$n_sim)),
-    sprintf("seed = %s", julia_int(spec$seed))
+    sprintf("seed = %s", julia_int(spec$seed)),
+    if (identical(spec$simulate_entrants, FALSE)) "entrants = false",
+    if (isTRUE(spec$observation_guided)) "guide = true"
   )
   if (!is.null(spec$is_informative)) {
     parts <- c(parts, sprintf(
@@ -438,7 +532,7 @@ lfo_spec_src <- function(spec, plan_expr) {
   prelude <- ""
   if (!is.null(spec$known_present)) {
     prelude <- sprintf(paste0(
-      "constrain, survival_weight = survival_constrained((i, t) -> begin\n",
+      "constrain, survival_weight = survival_constrained((i, t, last_t) -> begin\n",
       "%s\nend)\n"), indent(spec$known_present$src))
     parts <- c(parts, "constrain = constrain", "survival_weight = survival_weight")
   }
@@ -467,7 +561,8 @@ lfo_spec_src <- function(spec, plan_expr) {
 #' @param spec An [et_lfo_spec()].
 #' @param L Minimum training window.
 #' @param M Steps ahead scored per window.
-#' @param granularity One or more of `"pointwise"`, `"joint"`, `"by_group"`.
+#' @param granularity One or more of `"pointwise"`, `"by_individual"`, `"joint"`,
+#'   `"by_group"`. `"by_individual"` scores each animal's full M-step history.
 #'   `"by_group"` uses the model data's own `group`.
 #' @param stride Cutoff spacing (default every timepoint).
 #' @param blocks Sampler blocks, as for [et_sample()].
@@ -486,6 +581,14 @@ lfo_spec_src <- function(spec, plan_expr) {
 #'   which looks like a working comparison that resolves nothing. Truncation
 #'   keeps the full time dimension, so one matrix is the right shape at every
 #'   cutoff.
+#' @param cutoffs Optional explicit vector of cutoffs, overriding
+#'   `L:stride:(n_timepoints - M)`. `L` and `stride` still describe the grid the
+#'   cutoffs sit on, which a capture-recapture survival constraint uses to find
+#'   the end of the window each step belongs to.
+#' @param thin Keep every `thin`-th sweep after burn-in, so each cutoff's fit
+#'   holds `n_sweeps %/% thin` draws. Every retained draw carries a whole
+#'   `n_timepoints x n_individuals` trajectory, so on a large population this is
+#'   what keeps the fit, and its cache, in memory.
 #' @param fit_seed Base seed for the refits: the chain at cutoff `t` is seeded
 #'   `fit_seed + t`. Independent chains at the same cutoffs need different
 #'   values, and their own `cache` directories, since the cache is keyed on the
@@ -497,6 +600,7 @@ lfo_spec_src <- function(spec, plan_expr) {
 et_lfo_cv <- function(model, spec, L, M, granularity = "pointwise", stride = 1L,
                       blocks = list(), n_sweeps = 1000, n_burn = 0, n_adapts = 0,
                       adtype = "forwarddiff", cache = NULL, x_init = NULL,
+                      cutoffs = NULL, thin = 1L,
                       fit_seed = 1000L, quiet = FALSE) {
   et_require_session()
   if (!inherits(model, "et_model")) {
@@ -505,17 +609,31 @@ et_lfo_cv <- function(model, spec, L, M, granularity = "pointwise", stride = 1L,
   if (!inherits(spec, "et_lfo_spec")) {
     stop("et_lfo_cv(): `spec` must come from et_lfo_spec().", call. = FALSE)
   }
-  granularity <- match.arg(granularity, c("pointwise", "joint", "by_group"),
+  granularity <- match.arg(granularity,
+                           c("pointwise", "by_individual", "joint", "by_group"),
                            several.ok = TRUE)
   if ("by_group" %in% granularity && is.null(model$data$group)) {
     stop("et_lfo_cv(): granularity 'by_group' needs et_data(..., group=).",
          call. = FALSE)
   }
+  if (lfo_method(spec) == "exact_hmm" && M > 1L &&
+      any(!granularity %in% c("joint", "by_individual"))) {
+    stop("et_lfo_cv(): method = \"exact_hmm\" scores whole forecast blocks, so ",
+         "for M > 1 the granularity must be \"joint\" or \"by_individual\".",
+         call. = FALSE)
+  }
+  if (is_marginal(model) && !is.null(x_init)) {
+    stop("et_lfo_cv(): a marginal-likelihood model has no trajectory to start ",
+         "from; drop `x_init`.", call. = FALSE)
+  }
+  if (lfo_method(spec) == "simulate" && is.null(spec$cell_logdensity)) {
+    spec$cell_logdensity <- own_cell_logdensity(model)
+  }
 
   gen <- et_julia_source(model, blocks)
   mod <- et_load_module(gen)
   JuliaCall::julia_command(sprintf(
-    "Base.include_string(%s, \"using EpidemicTrajectories: truncation, LFOSpec, lfo_cv, Pointwise, Joint, ByGroup, survival_constrained\")",
+    "Base.include_string(%s, \"using EpidemicTrajectories: truncation, LFOSpec, lfo_cv, Pointwise, ByIndividual, Joint, ByGroup, survival_constrained, ExactHMM, cell_elpd\")",
     mod))
 
   # Truncation keeps the full time dimension (it clamps sampling periods
@@ -561,6 +679,7 @@ et_lfo_cv <- function(model, spec, L, M, granularity = "pointwise", stride = 1L,
 
   gran_src <- paste(vapply(granularity, function(g) switch(g,
     pointwise = "Pointwise()", joint = "Joint()",
+    by_individual = "ByIndividual()",
     by_group  = "ByGroup(DATA.group)"), character(1)), collapse = ", ")
   cache_src <- if (is.null(cache)) "nothing" else
     julia_string(julia_path(normalizePath(cache, mustWork = FALSE)))
@@ -571,20 +690,7 @@ et_lfo_cv <- function(model, spec, L, M, granularity = "pointwise", stride = 1L,
   # of the scored block. Bound once per (matrix, M).
   cr <- spec$capture_recapture
   if (!is.null(cr) && isTRUE(spec$constrain_survival)) {
-    # Overlapping windows put one step in several windows with different ends,
-    # and a lookup indexed by (t, i) cannot tell them apart.
-    if (stride < M) {
-      stop("et_lfo_cv(): constrain_survival with a capture-recapture score ",
-           "needs non-overlapping windows (stride >= M), so that each step's ",
-           "window end is known.", call. = FALSE)
-    }
-    spec$known_present <- cr_known_present(cr, L, M, stride)
-    sw_sym <- paste0(mod, "_lfo_seenwithin_src")
-    JuliaCall::julia_assign(sw_sym, sprintf(
-      "if !isdefined(@__MODULE__, :%s)\n%s\nend",
-      cr_seen_name(cr, L, M, stride), cr_seen_within_src(cr, L, M, stride)))
-    JuliaCall::julia_command(sprintf("Base.include_string(%s, Main.%s)",
-                                     mod, sw_sym))
+    spec$known_present <- cr_known_present(cr)
   }
 
   # one Julia expression: build the plan and the spec (both reference names --
@@ -598,14 +704,16 @@ et_lfo_cv <- function(model, spec, L, M, granularity = "pointwise", stride = 1L,
     "%s\n",
     "    et_lfo_cv(spec; L=%s, M=%s, granularity=(%s,), stride=%s, cache=%s,\n",
     "              verbose=%s, n_sweeps=%s, n_burn=%s, n_adapts=%s, adtype=%s,\n",
-    "              x_init=%s, fit_seed=%s)\n",
+    "              x_init=%s, fit_seed=%s, cutoffs=%s, thin=%s)\n",
     "end"),
     truncation_src(spec$truncation),
     indent(lfo_spec_src(spec, plan_expr = "plan")),
     julia_int(L), julia_int(M), gran_src, julia_int(stride), cache_src,
     if (quiet) "false" else "true",
     julia_int(n_sweeps), julia_int(n_burn), julia_int(n_adapts),
-    adtype_to_julia(adtype), x_sym, julia_int(fit_seed))
+    adtype_to_julia(default_adtype(model, adtype)), x_sym, julia_int(fit_seed),
+    if (is.null(cutoffs)) "nothing" else julia_vector(as.integer(cutoffs), "Int"),
+    julia_int(thin))
 
   # The result stays in Julia, under a name of its own, not round-tripped
   # through R, which has no faithful representation of an LFOResult (a Dict of
@@ -623,7 +731,9 @@ et_lfo_cv <- function(model, spec, L, M, granularity = "pointwise", stride = 1L,
   # session never collides with the first.
   .et_state$lfo_results <- c(.et_state$lfo_results %||% character(), res_sym)
   structure(list(sym = res_sym, module = mod, granularities = granularity,
-                 L = L, M = M), class = "et_lfo_result")
+                 L = L, M = M, method = lfo_method(spec),
+                 likelihood = model$likelihood %||% "augmented"),
+            class = "et_lfo_result")
 }
 
 # Inject, into the loaded module, a fit function usable as `LFOSpec.fit` and a
@@ -634,7 +744,7 @@ et_lfo_cv <- function(model, spec, L, M, granularity = "pointwise", stride = 1L,
 # `DATA`. Reusing those constants runs the latent update on the full series.
 et_lfo_inject <- function(mod, model) {
   nm <- paste0(mod, "_lfo_inject_src")
-  JuliaCall::julia_assign(nm, lfo_inject_src(model))
+  JuliaCall::julia_assign(nm, qualify_base(lfo_inject_src(model)))
   JuliaCall::julia_command(sprintf("Base.include_string(%s, Main.%s)", mod, nm))
 }
 
@@ -645,8 +755,59 @@ lfo_inject_src <- function(model) {
     !is.null(model$data$observation_weight)
   paste0(
     "if !isdefined(@__MODULE__, :et_lfo_fit)\n",
+    if (is_marginal(model)) lfo_fit_marginal_src() else lfo_fit_augmented_src(has_obs),
+    "# `data` truncated per cutoff, model refit fresh each time -- see truncate.jl\n",
+    "# for why shortening n_timepoints alone is not enough.\n",
+    "function et_lfo_cv(spec; L, M, granularity, stride=1, cache=nothing,\n",
+    "                    verbose=true, n_sweeps, n_burn=0, n_adapts=0, adtype,\n",
+    "                    x_init=nothing, fit_seed=1000, cutoffs=nothing, thin=1)\n",
+    "    fitfn = (train, t) -> et_lfo_fit(train; n_sweeps=n_sweeps, n_burn=n_burn,\n",
+    "                                      n_adapts=n_adapts, seed=fit_seed + t, adtype=adtype,\n",
+    "                                      x_init=x_init, thin=thin)\n",
+    "    spec2 = LFOSpec(fit=fitfn, cell_logdensity=spec.cell_logdensity,\n",
+    "                    plan=spec.plan, is_informative=spec.is_informative,\n",
+    "                    constrain=spec.constrain, survival_weight=spec.survival_weight,\n",
+    "                    n_sim=spec.n_sim, seed=spec.seed, scorer=spec.scorer,\n",
+    "                    entrants=spec.entrants, guide=spec.guide)\n",
+    "    lfo_cv(spec2, DATA; L=L, M=M, granularity=granularity, stride=stride,\n",
+    "          cache=cache, cutoffs=cutoffs, verbose=verbose)\n",
+    "end\n",
+    "end\n",
+    "nothing\n")
+}
+
+# A collapsed refit keeps parameter draws only: there is no trajectory. The
+# cache then holds draws alone, which the exact scorer reads directly and the
+# simulation scorer completes by backward sampling from the training data.
+lfo_fit_marginal_src <- function() paste0(
+  "function et_lfo_fit(data; n_sweeps, n_burn=0, n_adapts=0, seed=1,\n",
+  "                     adtype=ADTypes.AutoForwardDiff(), x_init=nothing, thin=1)\n",
+  "    x_init === nothing || error(\"a marginal-likelihood model takes no x_init\")\n",
+  "    et_check_independent!()\n",
+  "    m = et_the_model(data, et_marginal_for(data; threads=et_marginal_threads(adtype)))\n",
+  "    spl = et_sampler_for(data, nothing)\n",
+  "    rng = StableRNG(seed)\n",
+  "    t, state = AbstractMCMC.step(rng, m, spl; init=INIT_PARS, adtype=adtype,\n",
+  "                                 n_adapts=n_adapts)\n",
+  "    for _ in 1:n_burn\n",
+  "        t, state = AbstractMCMC.step(rng, m, spl, state; n_adapts=n_adapts)\n",
+  "    end\n",
+  "    n_keep = max(1, div(n_sweeps, thin))\n",
+  "    draws = Vector{Any}(undef, n_keep)\n",
+  "    k = 0\n",
+  "    for sweep in 1:n_sweeps\n",
+  "        sweep > 1 && ((t, state) = AbstractMCMC.step(rng, m, spl, state; n_adapts=n_adapts))\n",
+  "        sweep % thin == 0 && k < n_keep || continue\n",
+  "        k += 1\n",
+  "        draws[k] = et_params(t)\n",
+  "    end\n",
+  "    draws\n",
+  "end\n")
+
+lfo_fit_augmented_src <- function(has_obs) {
+  paste0(
     "function et_lfo_fit(data; n_sweeps, n_burn=0, n_adapts=0, seed=1,\n",
-    "                     adtype=ADTypes.AutoForwardDiff(), x_init=nothing)\n",
+    "                     adtype=ADTypes.AutoForwardDiff(), x_init=nothing, thin=1)\n",
     "    # All-susceptible is a poor start for a model whose infection route is\n",
     "    # transmission. iFFBS resamples one individual at a time, so with nobody\n",
     "    # infected the only way in is the background hazard, and a small one\n",
@@ -680,30 +841,18 @@ lfo_inject_src <- function(model) {
     "    for _ in 1:n_burn\n",
     "        t, state = AbstractMCMC.step(rng, m, spl, state; n_adapts=n_adapts)\n",
     "    end\n",
-    "    draws = Vector{Any}(undef, n_sweeps)\n",
-    "    Xs = Vector{Matrix{Int}}(undef, n_sweeps)\n",
-    "    draws[1] = et_params(t); Xs[1] = copy(t.X)\n",
-    "    for k in 2:n_sweeps\n",
-    "        t, state = AbstractMCMC.step(rng, m, spl, state; n_adapts=n_adapts)\n",
+    "    # Every `thin`-th sweep is kept; each kept draw holds a whole trajectory.\n",
+    "    n_keep = max(1, div(n_sweeps, thin))\n",
+    "    draws = Vector{Any}(undef, n_keep)\n",
+    "    Xs = Vector{Matrix{Int}}(undef, n_keep)\n",
+    "    k = 0\n",
+    "    for sweep in 1:n_sweeps\n",
+    "        sweep > 1 && ((t, state) = AbstractMCMC.step(rng, m, spl, state; n_adapts=n_adapts))\n",
+    "        sweep % thin == 0 && k < n_keep || continue\n",
+    "        k += 1\n",
     "        draws[k] = et_params(t); Xs[k] = copy(t.X)\n",
     "    end\n",
     "    (draws, Xs)\n",
-    "end\n",
-    "# `data` truncated per cutoff, model refit fresh each time -- see truncate.jl\n",
-    "# for why shortening n_timepoints alone is not enough.\n",
-    "function et_lfo_cv(spec; L, M, granularity, stride=1, cache=nothing,\n",
-    "                    verbose=true, n_sweeps, n_burn=0, n_adapts=0, adtype,\n",
-    "                    x_init=nothing, fit_seed=1000)\n",
-    "    fitfn = (train, t) -> et_lfo_fit(train; n_sweeps=n_sweeps, n_burn=n_burn,\n",
-    "                                      n_adapts=n_adapts, seed=fit_seed + t, adtype=adtype,\n",
-    "                                      x_init=x_init)\n",
-    "    spec2 = LFOSpec(fit=fitfn, cell_logdensity=spec.cell_logdensity,\n",
-    "                    plan=spec.plan, is_informative=spec.is_informative,\n",
-    "                    constrain=spec.constrain, survival_weight=spec.survival_weight,\n",
-    "                    n_sim=spec.n_sim, seed=spec.seed)\n",
-    "    lfo_cv(spec2, DATA; L=L, M=M, granularity=granularity, stride=stride,\n",
-    "          cache=cache, verbose=verbose)\n",
-    "end\n",
     "end\n")
 }
 
@@ -752,10 +901,71 @@ et_lfo_windows <- function(res) {
     "    )\n",
     "end"), res$sym, gnames, gnames)
   src_sym <- paste0(res$module, "_lfo_windows_src")
-  JuliaCall::julia_assign(src_sym, body)
+  JuliaCall::julia_assign(src_sym, qualify_base(body))
   raw <- JuliaCall::julia_eval(sprintf("Base.include_string(%s, Main.%s)",
                                        res$module, src_sym))
   as.data.frame(raw, stringsAsFactors = FALSE)
+}
+
+#' Per-cell scores from a leave-future-out sweep.
+#'
+#' The terms each window's score is the sum of. Under `"by_individual"` a cell
+#' is one individual's whole forecast block, so this is one row per
+#' (window, individual): what stacking over individual histories needs, and
+#' where to look when a window scores `-Inf`. A window total cannot be split
+#' back into these, because the log is taken per cell.
+#'
+#' @param res An [et_lfo_cv()] result.
+#' @param granularity Which granularity; defaults to the first one run.
+#' @return A data frame: `cutoff`, `cell` (the individual under
+#'   `"by_individual"`, `1` under `"joint"`, `"i:m"` or `"g:m"` for the per-step
+#'   granularities), `elpd`, and `n_finite`, the number of posterior draws that
+#'   gave the cell a finite density.
+#' @export
+et_lfo_cells <- function(res, granularity = res$granularities[1]) {
+  if (!inherits(res, "et_lfo_result")) {
+    stop("et_lfo_cells(): `res` must come from et_lfo_cv().", call. = FALSE)
+  }
+  granularity <- match.arg(granularity, res$granularities)
+  body <- sprintf(paste0(
+    "let c = cell_elpd(%s, %s)\n",
+    "    Dict(\"cutoff\" => c.cutoff,\n",
+    "         \"cell\" => [k isa Tuple ? join(k, \":\") : string(k) for k in c.cell],\n",
+    "         \"elpd\" => c.elpd, \"n_finite\" => c.n_finite)\n",
+    "end"), res$sym, julia_symbol(granularity))
+  src_sym <- paste0(res$module, "_lfo_cells_src")
+  JuliaCall::julia_assign(src_sym, qualify_base(body))
+  raw <- JuliaCall::julia_eval(sprintf("Base.include_string(%s, Main.%s)",
+                                       res$module, src_sym))
+  cell <- as.character(raw$cell)
+  out <- data.frame(cutoff = as.integer(raw$cutoff),
+                    cell = if (all(grepl("^[0-9]+$", cell))) as.integer(cell) else cell,
+                    elpd = as.numeric(raw$elpd),
+                    n_finite = as.integer(raw$n_finite),
+                    stringsAsFactors = FALSE)
+  out[order(out$cutoff, out$cell), , drop = FALSE]
+}
+
+#' A leave-future-out result as plain data.
+#'
+#' An [et_lfo_cv()] result is a handle into the Julia session that made it, so
+#' it cannot be saved and reloaded. This collects everything a later gather
+#' needs into ordinary R objects, ready for `saveRDS()`.
+#'
+#' @param res An [et_lfo_cv()] result.
+#' @return A list: `windows` ([et_lfo_windows()]), `cells` (a named list of
+#'   [et_lfo_cells()], one per granularity), and `method`, `likelihood`, `L`,
+#'   `M`.
+#' @export
+et_lfo_tables <- function(res) {
+  if (!inherits(res, "et_lfo_result")) {
+    stop("et_lfo_tables(): `res` must come from et_lfo_cv().", call. = FALSE)
+  }
+  list(windows = et_lfo_windows(res),
+       cells = stats::setNames(lapply(res$granularities,
+                                      function(g) et_lfo_cells(res, g)),
+                               res$granularities),
+       method = res$method, likelihood = res$likelihood, L = res$L, M = res$M)
 }
 
 #' Compare two leave-future-out sweeps.
@@ -784,6 +994,133 @@ et_lfo_compare <- function(a, b, granularity = a$granularities[1]) {
     a$module, a$sym, b$sym, julia_symbol(granularity)))
   out$granularity <- granularity
   out
+}
+
+#' Model weights from a set of leave-future-out sweeps.
+#'
+#' A margin says which model won and by how much; a weight says how much of the
+#' predictive job each model should be given, which is usually what a reader of
+#' a model comparison wants to know.
+#'
+#' Two methods, answering different questions. `"stacking"` (the default)
+#' chooses the weights that maximise the predictive density of the weighted
+#' MIXTURE, window by window, so a model that predicts well where the others
+#' predict badly earns weight even if its total is not the best.
+#' `"pseudo_bma"` is a softmax of the totals; it ignores between-window
+#' structure and collapses onto the single best model as the series lengthens,
+#' and is offered because it is what most people mean by "model weight".
+#'
+#' Windows in which ANY candidate scored non-finite are dropped, and the count
+#' is returned as `n_dropped`. Keeping them would let one model's degeneracy
+#' set the weights -- which is the mortality failure the survival-constrained
+#' proposal exists to fix, so it is reported rather than hidden.
+#'
+#' @param results A named list of [et_lfo_cv()] results, one per candidate. The
+#'   names label the models in the output.
+#' @param granularity Which granularity to weight on; defaults to the first one
+#'   the results were run under. Mixing granularities is refused.
+#' @param method `"stacking"` or `"pseudo_bma"`.
+#' @return A data frame with `model` and `weight`, carrying `method`,
+#'   `granularity`, `n_windows` and `n_dropped` as attributes.
+#' @export
+et_lfo_weights <- function(results, granularity = NULL, method = "stacking") {
+  if (!is.list(results) || length(results) < 2L) {
+    stop("et_lfo_weights(): `results` must be a list of at least two ",
+         "et_lfo_cv() results.", call. = FALSE)
+  }
+  if (is.null(names(results)) || any(!nzchar(names(results)))) {
+    stop("et_lfo_weights(): name the list, so the weights can be read back ",
+         "against the models -- list(null = a, rate = b, suscept = c).",
+         call. = FALSE)
+  }
+  for (r in results) {
+    if (!inherits(r, "et_lfo_result")) {
+      stop("et_lfo_weights(): every element must come from et_lfo_cv().",
+           call. = FALSE)
+    }
+  }
+  mods <- vapply(results, function(r) r$module, character(1))
+  if (length(unique(mods)) != 1L) {
+    stop("et_lfo_weights(): every result must come from models generated in ",
+         "the SAME Julia module.", call. = FALSE)
+  }
+  method <- match.arg(method, c("stacking", "pseudo_bma"))
+  if (is.null(granularity)) granularity <- results[[1]]$granularities[1]
+  granularity <- match.arg(granularity, results[[1]]$granularities)
+
+  # Symbol keys, not string keys: the call is built inside a Julia string that
+  # is itself inside an R string, so a `"name"` here would close the outer
+  # string early and emit invalid Julia. Symbols need no quotes at all.
+  check_julia_name(names(results), "model name")
+  pairs <- paste(sprintf("%s => %s",
+                         vapply(names(results), julia_symbol, character(1)),
+                         vapply(results, function(r) r$sym, character(1))),
+                 collapse = ", ")
+  out <- JuliaCall::julia_eval(sprintf(
+    "Base.include_string(%s, \"model_weights(Dict(%s); granularity=%s, method=%s)\")",
+    results[[1]]$module, pairs, julia_symbol(granularity),
+    julia_symbol(method)))
+
+  d <- data.frame(model = as.character(out$names),
+                  weight = as.numeric(out$weights),
+                  stringsAsFactors = FALSE)
+  d <- d[order(-d$weight), , drop = FALSE]
+  rownames(d) <- NULL
+  attr(d, "method") <- method
+  attr(d, "granularity") <- granularity
+  attr(d, "n_windows") <- out$n_windows
+  attr(d, "n_dropped") <- out$n_dropped
+  d
+}
+
+#' Model weights from per-window scores.
+#'
+#' The same weighting as [et_lfo_weights()], but from a matrix of per-window
+#' scores rather than from live [et_lfo_cv()] results.
+#'
+#' This is what a two-stage pipeline needs. An [et_lfo_cv()] result holds a
+#' handle into a generated Julia module, so it does not survive the session
+#' that made it -- a sweep that fits on a cluster and gathers afterwards has
+#' the numbers but not the objects. Per-window scores, being a data frame,
+#' do survive, and are enough to weight from.
+#'
+#' Windows with a non-finite score for ANY model are dropped and counted, for
+#' the reason [et_lfo_weights()] documents.
+#'
+#' @param scores A numeric matrix, one row per window and one column per
+#'   model, of per-window scores under a single granularity. Column names, if
+#'   present, label the models.
+#' @param method `"stacking"` or `"pseudo_bma"`.
+#' @return A data frame with `model` and `weight`, carrying `method`,
+#'   `n_windows` and `n_dropped` as attributes.
+#' @export
+et_weights_from_scores <- function(scores, method = "stacking") {
+  et_require_session()
+  scores <- as.matrix(scores)
+  if (!is.numeric(scores) || ncol(scores) < 2L) {
+    stop("et_weights_from_scores(): `scores` must be a numeric matrix with ",
+         "one column per model and at least two models.", call. = FALSE)
+  }
+  nms <- colnames(scores)
+  if (is.null(nms)) nms <- paste0("model", seq_len(ncol(scores)))
+  check_julia_name(nms, "model name")
+  method <- match.arg(method, c("stacking", "pseudo_bma"))
+
+  JuliaCall::julia_assign("_et_w_scores", scores)
+  JuliaCall::julia_command(
+    "using EpidemicTrajectories: model_weights")
+  out <- JuliaCall::julia_eval(sprintf(
+    "model_weights(_et_w_scores; names=%s, method=%s)",
+    julia_symbol_vector(nms), julia_symbol(method)))
+
+  d <- data.frame(model = nms, weight = as.numeric(out$weights),
+                  stringsAsFactors = FALSE)
+  d <- d[order(-d$weight), , drop = FALSE]
+  rownames(d) <- NULL
+  attr(d, "method") <- method
+  attr(d, "n_windows") <- out$n_windows
+  attr(d, "n_dropped") <- out$n_dropped
+  d
 }
 
 #' @export
@@ -834,15 +1171,47 @@ et_lfo_diagnostics <- function(cache) {
          " -- was et_lfo_cv() given cache=, and the directory kept?",
          call. = FALSE)
   }
+  JuliaCall::julia_command("import Serialization")
   out <- do.call(rbind, lapply(files, function(f) {
     src <- sprintf(lfo_diagnostics_src(),
                    julia_string(julia_path(normalizePath(f, mustWork = TRUE))))
     d <- as.data.frame(JuliaCall::julia_eval(src), stringsAsFactors = FALSE)
     if (!nrow(d)) return(NULL)
-    cbind(cutoff = as.integer(sub("^.*fit_t0*([0-9]+)[.]jls$", "\1", f)), d,
+    cbind(cutoff = as.integer(sub("^.*fit_t0*([0-9]+)[.]jls$", "\\1", f)), d,
           stringsAsFactors = FALSE)
   }))
   out[order(out$ess), ]
+}
+
+#' The parameter draws a leave-future-out sweep cached.
+#'
+#' One row per (cutoff, draw), one column per scalar parameter, read from the
+#' fits [et_lfo_cv()] wrote to `cache`. Plain data, so draws from separate
+#' chains (separate caches) can be compared or pooled after the session that
+#' made them has gone.
+#'
+#' @param cache The cache directory given to [et_lfo_cv()].
+#' @return A data frame: `cutoff`, `draw`, then the parameters.
+#' @export
+et_lfo_draws <- function(cache) {
+  et_require_session()
+  files <- sort(list.files(cache, pattern = "^fit_t[0-9]+[.]jls$",
+                           full.names = TRUE))
+  if (!length(files)) {
+    stop("et_lfo_draws(): no fit_t*.jls in ", cache, call. = FALSE)
+  }
+  JuliaCall::julia_command("import Serialization")
+  do.call(rbind, lapply(files, function(f) {
+    raw <- JuliaCall::julia_eval(sprintf(paste0(
+      "let fit = open(Serialization.deserialize, %s)\n",
+      "    draws = fit isa Tuple ? fit[1] : fit\n",
+      "    nms = [k for (k, v) in pairs(draws[1]) if v isa Real]\n",
+      "    Dict(String(n) => Float64[getproperty(d, n) for d in draws] for n in nms)\n",
+      "end"), julia_string(julia_path(normalizePath(f, mustWork = TRUE)))))
+    d <- as.data.frame(raw)
+    cbind(cutoff = as.integer(sub("^.*fit_t0*([0-9]+)[.]jls$", "\\1", f)),
+          draw = seq_len(nrow(d)), d)
+  }))
 }
 
 # The Julia half, as a pure function of nothing so it can be parse-checked
@@ -857,7 +1226,10 @@ et_lfo_diagnostics <- function(cache) {
 # ess/rhat/mcse each return a FlexiSummary wrapping a 3-D array, hence `only`.
 lfo_diagnostics_src <- function() paste0(
   "let FC = @eval(PracticalBayes, FlexiChains)\n",
-  "    draws, _ = open(deserialize, %s)\n",
+  # An augmented fit is cached as (draws, trajectories), a collapsed one as
+  # the draws alone; destructuring the latter would take its first two draws.
+  "    fit = open(Serialization.deserialize, %s)\n",
+  "    draws = fit isa Tuple ? fit[1] : fit\n",
   "    S = length(draws)\n",
   # Scalar rates only: a vector parameter would need flattening into one column
   # per element, and nothing in these models has one.

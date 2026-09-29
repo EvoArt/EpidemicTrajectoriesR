@@ -61,9 +61,28 @@ print.prior <- function(x, ...) {
 #'   factor. Requires the transitions to declare an [et_survival()]: the same
 #'   function is passed through automatically, which is the only way the
 #'   subtraction removes exactly what was multiplied in.
+#' @param likelihood How the hidden trajectories are handled.
+#'
+#'   * `"augmented"` (the default): the trajectory is a latent block, resampled
+#'     by iFFBS once per Gibbs sweep, and the parameters see the complete-data
+#'     likelihood given it. Works for any model, coupled or not.
+#'   * `"marginal"`: the trajectories are summed out exactly by the forward
+#'     algorithm, and the parameters are fitted against the marginal likelihood
+#'     alone, with no latent block, no `x_init` and no conjugate kernels. Valid
+#'     only when individuals are independent given the parameters: give each
+#'     individual its own group, or declare `coupled_transitions = list()` in
+#'     [et_data()]. The rates must not read the aggregates, and the observation
+#'     and starting-state functions must not read `X`; this is checked
+#'     numerically when the module is first used.
+#'
+#'   Cheaper and exactly mixing where it applies, because there is no
+#'   trajectory to mix over. It is also what makes [et_lfo_spec()]'s
+#'   `method = "exact_hmm"` score available without latent draws.
 #' @return An object of class `et_model`.
 #' @export
-et_model <- function(data, parameters, derived = list(), entry_time = NULL) {
+et_model <- function(data, parameters, derived = list(), entry_time = NULL,
+                     likelihood = c("augmented", "marginal")) {
+  likelihood <- match.arg(likelihood)
   if (!inherits(data, "et_data")) {
     stop("et_model(): `data` must come from et_data().", call. = FALSE)
   }
@@ -127,18 +146,75 @@ et_model <- function(data, parameters, derived = list(), entry_time = NULL) {
     }
   }
 
+  if (likelihood == "marginal") check_marginal(data, parameters, entry_time)
+
   # The reference set every downstream check uses: which names a parameter
   # expression may legally mention.
   structure(list(data = data, parameters = parameters, derived = derived,
-                 entry_time = entry_time,
+                 entry_time = entry_time, likelihood = likelihood,
                  par_names = names(parameters),
                  all_names = c(names(parameters), names(derived))),
             class = "et_model")
 }
 
+is_marginal <- function(model) identical(model$likelihood, "marginal")
+
+# For the entry points that read a sampled trajectory, which a collapsed fit
+# does not have.
+require_augmented <- function(model, caller) {
+  if (is_marginal(model)) {
+    stop(caller, " needs a sampled trajectory, and a model with likelihood = ",
+         "\"marginal\" has none: its trajectories are summed out.",
+         call. = FALSE)
+  }
+  invisible(TRUE)
+}
+
+# What a collapsed model cannot carry, refused at declaration rather than
+# discovered inside Julia. ET's own `require_independent` makes the coupling
+# check again on the built data, and its numeric tripwire covers what no
+# declaration can: a rate or callback that reads the latent state.
+check_marginal <- function(data, parameters, entry_time) {
+  if (!is.null(entry_time)) {
+    stop("et_model(): likelihood = \"marginal\" does not support `entry_time`. ",
+         "The entry gate changes the per-step factor the forward algorithm ",
+         "sums over.", call. = FALSE)
+  }
+  if (!is.null(data$likelihood_weight)) {
+    stop("et_model(): likelihood = \"marginal\" uses the FULL observation ",
+         "model. `likelihood_weight` splits off a factor for a conjugate ",
+         "kernel, and a collapsed model has no trajectory for such a kernel to ",
+         "condition on. Drop it and sample those parameters in the marginal ",
+         "likelihood with their actual priors.", call. = FALSE)
+  }
+  latent <- names(parameters)[vapply(parameters, function(p) p$kind == "latent",
+                                     logical(1))]
+  if (length(latent)) {
+    stop("et_model(): likelihood = \"marginal\" has no conjugate kernels, so ",
+         "parameter(s) ", paste(latent, collapse = ", "), " declared with ",
+         "kind = \"latent\" would never be informed. Give them a prior.",
+         call. = FALSE)
+  }
+  grouped <- !is.null(data$group) && anyDuplicated(data$group) > 0L
+  shared <- is.null(data$group) || grouped ||
+    !is.null(data$affected_individuals)
+  declared_none <- !is.null(data$coupled_transitions) &&
+    length(data$coupled_transitions) == 0L
+  if (shared && !declared_none) {
+    stop("et_model(): likelihood = \"marginal\" needs individuals that are ",
+         "independent given the parameters, but they share groups or ",
+         "neighbours and nothing declares that none of their transitions ",
+         "depend on each other. Give each individual its own group, or pass ",
+         "coupled_transitions = list() to et_data() if the model has no ",
+         "between-individual coupling.", call. = FALSE)
+  }
+  invisible(TRUE)
+}
+
 #' @export
 print.et_model <- function(x, ...) {
-  cat("<et_model>\n")
+  cat("<et_model>", if (is_marginal(x)) " marginal likelihood (trajectories summed out)",
+      "\n", sep = "")
   print(x$data)
   cat("  parameters:\n")
   for (nm in x$par_names) {

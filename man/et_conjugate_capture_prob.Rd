@@ -12,7 +12,8 @@ et_conjugate_capture_prob(
   index,
   dead_state,
   n,
-  prior = c(1, 1)
+  prior = c(1, 1),
+  available = NULL
 )
 }
 \arguments{
@@ -27,6 +28,12 @@ per-time index selecting which probability applies.}
 \item{n}{Number of probabilities (e.g. seasons).}
 
 \item{prior}{\code{c(a, b)}.}
+
+\item{available}{Optional predicate \verb{(X, data, i, t)}: which live cells count
+as a chance to be caught. Defaults to every live cell in the sampling
+period. It must agree with the capture factor of the observation weight:
+if that factor is neutral before an individual's first capture (the usual
+way of conditioning on entry), those cells must not be counted here either.}
 }
 \value{
 An \code{et_block}.

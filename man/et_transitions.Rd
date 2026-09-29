@@ -4,7 +4,7 @@
 \alias{et_transitions}
 \title{Declare a model's states, transitions and rates.}
 \usage{
-et_transitions(states, ..., survival = NULL, auto_self = TRUE)
+et_transitions(states, ..., survival = NULL, auto_self = TRUE, shared = NULL)
 }
 \arguments{
 \item{states}{Character vector of state names. The order fixes the encoding:
@@ -18,6 +18,13 @@ mirrors the Julia line character for character.}
 
 \item{auto_self}{Fill each state's self-transition with the leftover
 probability mass (ET's \verb{:auto_self}, on by default).}
+
+\item{shared}{Optional function \verb{(model, data, i, t)} returning a \code{list()} of
+named quantities that several rates need, computed once per individual and
+timepoint instead of once per rate. Every rate (and the survival function)
+then takes a fifth argument, \code{shared}, and reads them as \code{shared$name}.
+Worth it whenever rates repeat work: a death probability scaling every
+live move, a hazard built from covariates.}
 }
 \value{
 An object of class \code{et_transitions}.
@@ -29,4 +36,10 @@ Declare a model's states, transitions and rates.
 infection <- function(model, data, i, t) -expm1(-model$alpha)
 recovery  <- function(model, data, i, t) 1 / model$m
 et_transitions(c("S", "I"), "S -> I" = infection, "I -> S" = recovery)
+
+# one death probability, computed once, in both moves out of S
+et_transitions(c("S", "I", "D"),
+  shared = function(model, data, i, t) list(die = -expm1(-model$mu)),
+  "S -> I" = function(model, data, i, t, shared) (1 - shared$die) * model$beta,
+  "S -> D" = function(model, data, i, t, shared) shared$die)
 }

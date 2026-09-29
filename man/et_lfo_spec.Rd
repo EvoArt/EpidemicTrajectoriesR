@@ -5,22 +5,27 @@
 \title{A leave-future-out scoring specification.}
 \usage{
 et_lfo_spec(
-  cell_logdensity,
+  cell_logdensity = NULL,
   truncation,
   is_informative = NULL,
   constrain_survival = FALSE,
   known_present = NULL,
   n_sim = 1L,
-  seed = 13L
+  seed = 13L,
+  simulate_entrants = TRUE,
+  observation_guided = FALSE,
+  method = c("simulate", "exact_hmm")
 )
 }
 \arguments{
-\item{cell_logdensity}{Either an \code{\link[=et_capture_recapture]{et_capture_recapture()}} (the usual case)
-which also derives \code{known_present} for you, or an \code{\link[=et_julia]{et_julia()}} wrapping a
-Julia function \verb{(model, data, X, i, t) -> Float64}: individual \code{i}'s
-observation log-density at \code{t} given the simulated states \code{X}. Return
-\code{-Inf} for an inadmissible trajectory; it is charged to that individual's
-own cell, never to the whole window.}
+\item{cell_logdensity}{How a simulated state is scored against an
+observation. \code{NULL} (the default) uses the model's own observation weight,
+which keeps the score and the fitted model on one observation model and is
+what \code{method = "exact_hmm"} scores with too. Otherwise an
+\code{\link[=et_capture_recapture]{et_capture_recapture()}}, which also derives \code{known_present} for you, or
+an \code{\link[=et_julia]{et_julia()}} wrapping a Julia function \verb{(model, data, X, i, t) -> Float64}: individual \code{i}'s observation log-density at \code{t} given the
+simulated states \code{X}. Return \code{-Inf} for an inadmissible trajectory; it is
+charged to that individual's own cell, never to the whole window.}
 
 \item{truncation}{An \code{\link[=et_lfo_truncation]{et_lfo_truncation()}}.}
 
@@ -56,21 +61,55 @@ of the scored window}, whichever step of the window is being simulated.
 That bound matters. A capture after the window's last occasion is outside
 the block being scored, and conditioning on it deletes a death branch
 carrying real probability mass: a lost positive contribution that no
-reweighting restores. It needs non-overlapping windows (\code{stride >= M}).
-Otherwise supply \code{known_present}, and bound it yourself.}
+reweighting restores. Otherwise supply \code{known_present}.}
 
-\item{known_present}{Optional \code{\link[=et_julia]{et_julia()}} whose body is a function of \code{i}
-and \code{t} only: individual \code{i} is known to be alive at \code{t}. \strong{\code{data} is not
-in scope}: ET calls this as \code{known_present(i, t)}, so reach arrays through
-the generated module's own \code{DATA}, e.g. \code{t <= DATA.last_seen[i]}. The
-window's cutoff is not passed either, so a lookahead such as
-\code{t:(t + M - 1)} runs past the window for every step after the first; bound
-it at the end of the window \code{t} belongs to. Ignored unless
-\code{constrain_survival} is \code{TRUE}.}
+\item{known_present}{Who is known to be alive, for \code{constrain_survival}:
+the name of a 0/1 capture matrix in \code{extras} (alive at \code{t} if caught at
+some occasion from \code{t} to the end of the scored window), or an
+\code{\link[=et_julia]{et_julia()}} whose body is a function of \code{i}, \code{t} and \code{last_t}, the
+window's last occasion, e.g. \verb{any(==(1), @view DATA.caught[t:last_t, i])}.
+\code{data} is not in scope, so reach arrays through the generated module's
+own \code{DATA}. Never look past \code{last_t}. Ignored unless \code{constrain_survival}
+is \code{TRUE}.}
 
 \item{n_sim}{Forward trajectories per posterior draw per window.}
 
 \item{seed}{Base RNG seed for the forward simulation.}
+
+\item{simulate_entrants}{Whether individuals entering after the cutoff are
+simulated into the forecast, drawn from the starting state at their entry
+time, so that they can affect the cohort's dynamics. That uses entry times
+only later data reveal; \code{FALSE} fixes the forecast population at the
+cutoff. It matters only for coupled models.}
+
+\item{observation_guided}{Simulate from the observation-guided proposal:
+each animal's next state is drawn in proportion to its move probability
+times how likely its own observations over the rest of the window are
+from that state, and the importance weight is carried with the score.
+The survival constraint is the special case that looks only at whether
+the animal is alive; this one also avoids transient states the data rule
+out, such as a seronegative animal converting before a negative test.
+Not with \code{constrain_survival}. For a coupled model it corrects only the
+joint score, so et_lfo_cv() then takes \code{granularity = "joint"} alone.}
+
+\item{method}{How each posterior draw's predictive density is computed.
+\itemize{
+\item \code{"simulate"} (the default): forward-simulate from the draw's sampled
+state at the cutoff and score with \code{cell_logdensity}. Works for any
+model.
+\item \code{"exact_hmm"}: for individuals independent given the parameters, sum
+each one's state at the cutoff and its future path out exactly, by the
+forward algorithm, and score with the model's own observation process.
+No forward simulation, so no \code{cell_logdensity}, \code{n_sim} or survival
+constraint; the only Monte Carlo error left is the posterior draws'.
+Scores whole forecast blocks, so for \code{M > 1} it takes the \code{"joint"} and
+\code{"by_individual"} granularities.
+}
+
+The method and the model's \code{likelihood} are separate choices: an
+augmented (iFFBS) fit can be scored exactly, and a marginal fit can be
+scored by simulation, its trajectories then drawn afterwards from their
+exact posterior given the training data.}
 }
 \value{
 An object of class \code{et_lfo_spec}.

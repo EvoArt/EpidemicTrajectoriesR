@@ -25,9 +25,14 @@
 #' @param states The state space, in encoding order. Needed to resolve a name
 #'   compared against the trajectory to its code.
 #' @param reads An environment accumulating the `model$x` names read.
+#' @param state_codes `TRUE` where the body becomes a plain Julia function
+#'   rather than an `@aggregate` line: `state` then arrives as the integer code,
+#'   and no macro is there to turn a Symbol into one, so a name compared against
+#'   `state` must be emitted as its code too.
 #' @keywords internal
 new_ctx <- function(helpers = character(), vector_result = FALSE,
-                    state_syms = FALSE, states = character(), reads = NULL) {
+                    state_syms = FALSE, states = character(), reads = NULL,
+                    state_codes = FALSE, typed_list = FALSE) {
   if (is.null(reads)) {
     reads <- new.env(parent = emptyenv())
     reads$model <- character()
@@ -35,7 +40,8 @@ new_ctx <- function(helpers = character(), vector_result = FALSE,
     reads$uses_type <- FALSE
   }
   list(helpers = helpers, vector_result = vector_result,
-       state_syms = state_syms, states = states, reads = reads)
+       state_syms = state_syms, states = states, reads = reads,
+       state_codes = state_codes, typed_list = typed_list)
 }
 
 # Maths / builtin calls allowed in a body, mapped R-name -> Julia-name.
@@ -136,6 +142,8 @@ et_transpile_expr <- function(e, ctx = new_ctx()) {
                   et_transpile_expr(e[[3]], ctx)))
   }
 
+  if (op == "list") return(transpile_list(e, ctx))
+
   transpile_call(e, ctx, op)
 }
 
@@ -218,14 +226,22 @@ transpile_for <- function(e, ctx) {
 #
 # Emitting `:E` for the second would compare an Int to a Symbol: never true, no
 # error, and a tracked array that quietly counts nothing.
+#
+# The first holds only inside an `@aggregate` body, because it is the macro that
+# rewrites `state == :I` into a code comparison. A body emitted as a plain
+# function (an et_summary(), or et_aggregates()' derived updates) receives the
+# integer code with nothing to translate the Symbol, so there `state == "I"`
+# must be emitted as the code as well (`ctx$state_codes`).
 transpile_binop <- function(e, ctx, op) {
   lhs <- e[[2]]; rhs <- e[[3]]
   if (isTRUE(ctx$state_syms) && op %in% c("==", "!=")) {
+    state_rhs <- function(nm) if (isTRUE(ctx$state_codes))
+      state_code_or_stop(nm, ctx) else julia_symbol(nm)
     if (identical(lhs, quote(state)) && is.character(rhs)) {
-      return(paste0("state ", op, " ", julia_symbol(rhs)))
+      return(paste0("state ", op, " ", state_rhs(rhs)))
     }
     if (identical(rhs, quote(state)) && is.character(lhs)) {
-      return(paste0(julia_symbol(lhs), " ", op, " state"))
+      return(paste0(state_rhs(lhs), " ", op, " state"))
     }
     if (is.character(rhs) && is_trajectory_ref(lhs)) {
       return(paste0(et_transpile_expr(lhs, ctx), " ", op, " ",
@@ -284,6 +300,31 @@ transpile_dollar <- function(e, ctx) {
     return(paste0("model.", field))
   }
   paste0(et_transpile_expr(obj, ctx), ".", field)
+}
+
+# `list(a = x, b = y)` -> `(; a = x, b = y)`, a NamedTuple: the value a shared
+# step function returns, read in the rates as `shared$a`. Every element is named,
+# since an element is only ever reached by name.
+transpile_list <- function(e, ctx) {
+  args <- as.list(e)[-1L]
+  nms <- names(args)
+  if (!length(args) || is.null(nms) || any(!nzchar(nms))) {
+    stop("transpile: `list()` must name every element, e.g. ",
+         "list(die = d, stay = 1 - d); its elements are read by name.",
+         call. = FALSE)
+  }
+  check_julia_name(nms, "list element name")
+  vals <- vapply(args, et_transpile_expr, character(1), ctx = ctx)
+  # In a shared step function every element is carried in the parameter type,
+  # for the reason a scalar role converts its return: `ifelse(entry, 1, p)` is
+  # an Int on one branch and a Dual on the other, and one such field makes the
+  # whole NamedTuple abstract, so every rate reading it dispatches at run time
+  # (measured: a 3x slower gradient).
+  if (isTRUE(ctx$typed_list)) {
+    ctx$reads$uses_type <- TRUE
+    vals <- sprintf("convert(%s, %s)", ET_TYPE_VAR, vals)
+  }
+  paste0("(; ", paste(sprintf("%s = %s", nms, vals), collapse = ", "), ")")
 }
 
 transpile_call <- function(e, ctx, op) {
