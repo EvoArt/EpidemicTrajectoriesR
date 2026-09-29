@@ -67,10 +67,16 @@ et_setup <- function(julia_home = NULL, project = NULL, dev = NULL,
 #' @export
 et_is_ready <- function() isTRUE(.et_state$ready)
 
-#' The pinned Julia project shipped with this package.
+#' The Julia project a session activates.
+#'
+#' The environment variable `ETR_JULIA_PROJECT` when set, so a cluster job can
+#' point every script at one isolated environment; otherwise the pinned project
+#' shipped with this package.
 #' @return A path.
 #' @export
 et_julia_project <- function() {
+  env <- Sys.getenv("ETR_JULIA_PROJECT")
+  if (nzchar(env)) return(env)
   p <- system.file("julia", package = "EpidemicTrajectoriesR")
   if (!nzchar(p)) {
     # Running from a source checkout rather than an installed package.
