@@ -220,6 +220,36 @@ test_that("the injected fit RETAINS the trajectory", {
   expect_true(julia_parses(src))
 })
 
+test_that("the injected fit can start where another ended, and says where it ended", {
+  for (src in list(inject_src(toy_model()), inject_src(cjs_model(cjs_sim())))) {
+    code <- grep("^\\s*#", strsplit(src, "\n")[[1]], value = TRUE, invert = TRUE)
+    code <- paste(code, collapse = "\n")
+    expect_match(code, "pars0 = warm === nothing ? INIT_PARS : merge(INIT_PARS, warm.values)",
+                 fixed = TRUE)
+    expect_match(code, "(spl = warm_start(spl, warm.tuning; adapt=adapt))", fixed = TRUE)
+    expect_match(code, "sampler=lfo_sampler_state(spl, state))", fixed = TRUE)
+    expect_match(code, "warm=warm isa AbstractDict ? warm[t] : warm", fixed = TRUE)
+    # The warm start comes after the sampler is built from the truncated data.
+    expect_lt(regexpr("spl = et_sampler_for(data", code, fixed = TRUE),
+              regexpr("warm_start(spl", code, fixed = TRUE))
+    expect_true(julia_parses(src))
+  }
+})
+
+test_that("cached fits are read in every shape they have been written in", {
+  cached <- EpidemicTrajectoriesR:::lfo_cached_draws_src
+  expect_match(cached, "fit isa NamedTuple ? fit.draws", fixed = TRUE)
+  expect_true(julia_parses(sprintf("let fit = (draws = [1], X = [2], sampler = nothing)\n    %s\nend",
+                                   cached)))
+})
+
+test_that("warm_start is refused unless it is a result or a saved file", {
+  warm_src <- EpidemicTrajectoriesR:::lfo_warm_start_src
+  expect_equal(warm_src(NULL, NULL), "nothing")
+  expect_error(warm_src(tempfile(), NULL), "no such `warm_start` file")
+  expect_error(warm_src(list(), NULL), "must be an et_lfo_cv\\(\\) result")
+})
+
 test_that("a model with no observation process omits OBSLOGLIK", {
   m <- toy_model()
   m$data$observation_weight <- NULL
@@ -276,8 +306,8 @@ test_that("the injected fit takes x_init and defaults to all-susceptible", {
 test_that("the refit seed is an argument, so chains at a cutoff can differ", {
   src <- inject_src(toy_model())
   # The default keeps existing results reproducible; a second chain needs its own.
-  expect_match(src, "fit_seed=1000, cutoffs=nothing, thin=1)", fixed = TRUE)
-  expect_match(src, "x_init=x_init, thin=thin)", fixed = TRUE)
+  expect_match(src, "fit_seed=1000, cutoffs=nothing, thin=1,", fixed = TRUE)
+  expect_match(src, "x_init=x_init, thin=thin,", fixed = TRUE)
   expect_match(src, "cache=cache, cutoffs=cutoffs, verbose=verbose)", fixed = TRUE)
   expect_match(src, "seed=fit_seed + t", fixed = TRUE)
   expect_false(grepl("seed=1000 + t", src, fixed = TRUE))

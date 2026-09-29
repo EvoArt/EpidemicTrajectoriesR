@@ -593,6 +593,19 @@ lfo_spec_src <- function(spec, plan_expr) {
 #'   `fit_seed + t`. Independent chains at the same cutoffs need different
 #'   values, and their own `cache` directories, since the cache is keyed on the
 #'   cutoff alone.
+#' @param warm_start Start each refit where an earlier one ended: from its last
+#'   parameter values, and with every HMC block on its adapted metric and step
+#'   size. Either an earlier `et_lfo_cv()` result, whose fit at the same cutoff
+#'   is used, or a file written by [et_lfo_save_sampler()], used at every
+#'   cutoff. The trajectory still comes from `x_init`. Fits of the same model
+#'   to nearly the same data -- the same cutoff with one more condition, say --
+#'   then need a fraction of the warm-up. A warm start changes where the chain
+#'   begins, not what it targets, so a cached fit is still reused.
+#' @param adapt What warm-up re-learns after a warm start, over `n_adapts`
+#'   sweeps: `"step_size"` (the default) keeps the carried metric and tunes the
+#'   step size only; `"full"` re-runs the whole adaptation. With
+#'   `n_adapts = 0` the carried metric and step size are used unchanged.
+#'   Ignored without `warm_start`.
 #' @param quiet Suppress progress messages.
 #' @return An object of class `et_lfo_result`. `$granularities` names what was
 #'   scored; use [et_lfo_elpd()] and [et_lfo_compare()] to read it.
@@ -601,8 +614,10 @@ et_lfo_cv <- function(model, spec, L, M, granularity = "pointwise", stride = 1L,
                       blocks = list(), n_sweeps = 1000, n_burn = 0, n_adapts = 0,
                       adtype = "forwarddiff", cache = NULL, x_init = NULL,
                       cutoffs = NULL, thin = 1L,
-                      fit_seed = 1000L, quiet = FALSE) {
+                      fit_seed = 1000L, warm_start = NULL,
+                      adapt = c("step_size", "full"), quiet = FALSE) {
   et_require_session()
+  adapt <- match.arg(adapt)
   if (!inherits(model, "et_model")) {
     stop("et_lfo_cv(): `model` must come from et_model().", call. = FALSE)
   }
@@ -648,6 +663,7 @@ et_lfo_cv <- function(model, spec, L, M, granularity = "pointwise", stride = 1L,
   }
 
   et_lfo_inject(mod, model)   # idempotent: defines et_lfo_fit/et_lfo_cv once
+  warm_src <- lfo_warm_start_src(warm_start, cutoffs)
 
   # `constrain_survival` on a model with no absorbing state would be a silent
   # no-op: ET's survival_weight derives the absorbing state itself and returns
@@ -704,7 +720,8 @@ et_lfo_cv <- function(model, spec, L, M, granularity = "pointwise", stride = 1L,
     "%s\n",
     "    et_lfo_cv(spec; L=%s, M=%s, granularity=(%s,), stride=%s, cache=%s,\n",
     "              verbose=%s, n_sweeps=%s, n_burn=%s, n_adapts=%s, adtype=%s,\n",
-    "              x_init=%s, fit_seed=%s, cutoffs=%s, thin=%s)\n",
+    "              x_init=%s, fit_seed=%s, cutoffs=%s, thin=%s,\n",
+    "              warm=%s, adapt=:%s)\n",
     "end"),
     truncation_src(spec$truncation),
     indent(lfo_spec_src(spec, plan_expr = "plan")),
@@ -713,7 +730,7 @@ et_lfo_cv <- function(model, spec, L, M, granularity = "pointwise", stride = 1L,
     julia_int(n_sweeps), julia_int(n_burn), julia_int(n_adapts),
     adtype_to_julia(default_adtype(model, adtype)), x_sym, julia_int(fit_seed),
     if (is.null(cutoffs)) "nothing" else julia_vector(as.integer(cutoffs), "Int"),
-    julia_int(thin))
+    julia_int(thin), warm_src, adapt)
 
   # The result stays in Julia, under a name of its own, not round-tripped
   # through R, which has no faithful representation of an LFOResult (a Dict of
@@ -736,6 +753,85 @@ et_lfo_cv <- function(model, spec, L, M, granularity = "pointwise", stride = 1L,
             class = "et_lfo_result")
 }
 
+#' Save where a leave-future-out fit ended, to start a later fit from.
+#'
+#' Writes the sampler state [et_lfo_cv()] kept for one cutoff -- the last
+#' parameter values and each HMC block's adapted metric and step size -- to
+#' `file`, for `et_lfo_cv(warm_start = file)`. A file outlives the session, so a
+#' job that stops part-way through a sequence of related fits can resume it
+#' without redoing the warm-up. It is written with Julia's `Serialization`, so
+#' read it back under the same Julia version.
+#'
+#' @param res An [et_lfo_cv()] result.
+#' @param file Where to write.
+#' @param cutoff Which cutoff's fit. May be left out when `res` has one.
+#' @return `file`, invisibly.
+#' @export
+et_lfo_save_sampler <- function(res, file, cutoff = NULL) {
+  et_require_session()
+  if (!inherits(res, "et_lfo_result")) {
+    stop("et_lfo_save_sampler(): `res` must come from et_lfo_cv().", call. = FALSE)
+  }
+  have <- lfo_sampler_cutoffs(res, "et_lfo_save_sampler()")
+  if (is.null(cutoff)) {
+    if (length(have) != 1L) {
+      stop("et_lfo_save_sampler(): `res` has fits at ", length(have),
+           " cutoffs; say which with `cutoff`.", call. = FALSE)
+    }
+    cutoff <- have
+  }
+  if (!cutoff %in% have) {
+    stop("et_lfo_save_sampler(): no fit at cutoff ", cutoff, " (have ",
+         paste(have, collapse = ", "), ").", call. = FALSE)
+  }
+  JuliaCall::julia_command("import Serialization")
+  JuliaCall::julia_command(sprintf(
+    "open(io -> Main.Serialization.serialize(io, %s[%d]), %s, \"w\"); nothing",
+    lfo_sampler_dict_src(res), as.integer(cutoff),
+    julia_string(julia_path(normalizePath(file, mustWork = FALSE)))))
+  invisible(file)
+}
+
+# The sampler states a result's fits recorded, by cutoff. Results from before
+# fits recorded one have none.
+lfo_sampler_dict_src <- function(res) sprintf(
+  "get(Main.%s.%s.meta, :sampler, Dict{Int,Any}())", res$module, res$sym)
+
+lfo_sampler_cutoffs <- function(res, caller) {
+  have <- as.integer(JuliaCall::julia_eval(sprintf(
+    "sort(collect(keys(%s)))", lfo_sampler_dict_src(res))))
+  if (!length(have)) {
+    stop(caller, ": the fits in this result recorded no sampler state.",
+         call. = FALSE)
+  }
+  have
+}
+
+# The value the injected et_lfo_cv takes as `warm`: nothing, an earlier result's
+# states by cutoff, or one state read from a file.
+lfo_warm_start_src <- function(warm_start, cutoffs) {
+  if (is.null(warm_start)) return("nothing")
+  if (inherits(warm_start, "et_lfo_result")) {
+    have <- lfo_sampler_cutoffs(warm_start, "et_lfo_cv()")
+    miss <- setdiff(cutoffs, have)
+    if (length(miss)) {
+      stop("et_lfo_cv(): `warm_start` has no fit at cutoff ",
+           paste(miss, collapse = ", "), ".", call. = FALSE)
+    }
+    return(lfo_sampler_dict_src(warm_start))
+  }
+  if (is.character(warm_start) && length(warm_start) == 1L) {
+    if (!file.exists(warm_start)) {
+      stop("et_lfo_cv(): no such `warm_start` file: ", warm_start, call. = FALSE)
+    }
+    JuliaCall::julia_command("import Serialization")
+    return(sprintf("open(Main.Serialization.deserialize, %s)",
+                   julia_string(julia_path(normalizePath(warm_start)))))
+  }
+  stop("et_lfo_cv(): `warm_start` must be an et_lfo_cv() result or a file ",
+       "written by et_lfo_save_sampler().", call. = FALSE)
+}
+
 # Inject, into the loaded module, a fit function usable as `LFOSpec.fit` and a
 # thin `et_lfo_cv` wrapper that supplies it. Mirrors et_run() (codegen.R), with
 # the same INIT_PARS and the same blocks, except that it takes `data` as an
@@ -755,15 +851,19 @@ lfo_inject_src <- function(model) {
     !is.null(model$data$observation_weight)
   paste0(
     "if !isdefined(@__MODULE__, :et_lfo_fit)\n",
+    lfo_sampler_state_src,
     if (is_marginal(model)) lfo_fit_marginal_src() else lfo_fit_augmented_src(has_obs),
     "# `data` truncated per cutoff, model refit fresh each time -- see truncate.jl\n",
     "# for why shortening n_timepoints alone is not enough.\n",
+    "# `warm` is one sampler state for every cutoff, or a Dict of them by cutoff.\n",
     "function et_lfo_cv(spec; L, M, granularity, stride=1, cache=nothing,\n",
     "                    verbose=true, n_sweeps, n_burn=0, n_adapts=0, adtype,\n",
-    "                    x_init=nothing, fit_seed=1000, cutoffs=nothing, thin=1)\n",
+    "                    x_init=nothing, fit_seed=1000, cutoffs=nothing, thin=1,\n",
+    "                    warm=nothing, adapt=:step_size)\n",
     "    fitfn = (train, t) -> et_lfo_fit(train; n_sweeps=n_sweeps, n_burn=n_burn,\n",
     "                                      n_adapts=n_adapts, seed=fit_seed + t, adtype=adtype,\n",
-    "                                      x_init=x_init, thin=thin)\n",
+    "                                      x_init=x_init, thin=thin, adapt=adapt,\n",
+    "                                      warm=warm isa AbstractDict ? warm[t] : warm)\n",
     "    spec2 = LFOSpec(fit=fitfn, cell_logdensity=spec.cell_logdensity,\n",
     "                    plan=spec.plan, is_informative=spec.is_informative,\n",
     "                    constrain=spec.constrain, survival_weight=spec.survival_weight,\n",
@@ -781,13 +881,16 @@ lfo_inject_src <- function(model) {
 # simulation scorer completes by backward sampling from the training data.
 lfo_fit_marginal_src <- function() paste0(
   "function et_lfo_fit(data; n_sweeps, n_burn=0, n_adapts=0, seed=1,\n",
-  "                     adtype=ADTypes.AutoForwardDiff(), x_init=nothing, thin=1)\n",
+  "                     adtype=ADTypes.AutoForwardDiff(), x_init=nothing, thin=1,\n",
+  "                     warm=nothing, adapt=:step_size)\n",
   "    x_init === nothing || error(\"a marginal-likelihood model takes no x_init\")\n",
   "    et_check_independent!()\n",
+  "    pars0 = warm === nothing ? INIT_PARS : merge(INIT_PARS, warm.values)\n",
   "    m = et_the_model(data, et_marginal_for(data; threads=et_marginal_threads(adtype)))\n",
   "    spl = et_sampler_for(data, nothing)\n",
+  lfo_warm_sampler_src,
   "    rng = StableRNG(seed)\n",
-  "    t, state = AbstractMCMC.step(rng, m, spl; init=INIT_PARS, adtype=adtype,\n",
+  "    t, state = AbstractMCMC.step(rng, m, spl; init=pars0, adtype=adtype,\n",
   "                                 n_adapts=n_adapts)\n",
   "    for _ in 1:n_burn\n",
   "        t, state = AbstractMCMC.step(rng, m, spl, state; n_adapts=n_adapts)\n",
@@ -801,13 +904,27 @@ lfo_fit_marginal_src <- function() paste0(
   "        k += 1\n",
   "        draws[k] = et_params(t)\n",
   "    end\n",
-  "    draws\n",
+  "    (draws=draws, sampler=lfo_sampler_state(spl, state))\n",
   "end\n")
+
+# A warm start begins where an earlier fit ended (`pars0`, set by the caller) and
+# with its HMC blocks on that fit's metric and step size; `adapt` says what
+# warm-up still re-learns.
+lfo_warm_sampler_src <- paste0(
+  "    warm === nothing || (spl = warm_start(spl, warm.tuning; adapt=adapt))\n")
+
+# What a later fit needs to start where this one ended: the last sweep's values
+# (less the trajectory, which the caller chooses) and each HMC block's tuning.
+lfo_sampler_state_src <- paste0(
+  "lfo_sampler_state(spl, state) =\n",
+  "    (values=Base.structdiff(state.values, NamedTuple{(:X,)}),\n",
+  "     tuning=hmc_tuning(spl, state))\n")
 
 lfo_fit_augmented_src <- function(has_obs) {
   paste0(
     "function et_lfo_fit(data; n_sweeps, n_burn=0, n_adapts=0, seed=1,\n",
-    "                     adtype=ADTypes.AutoForwardDiff(), x_init=nothing, thin=1)\n",
+    "                     adtype=ADTypes.AutoForwardDiff(), x_init=nothing, thin=1,\n",
+    "                     warm=nothing, adapt=:step_size)\n",
     "    # All-susceptible is a poor start for a model whose infection route is\n",
     "    # transmission. iFFBS resamples one individual at a time, so with nobody\n",
     "    # infected the only way in is the background hazard, and a small one\n",
@@ -819,8 +936,9 @@ lfo_fit_augmented_src <- function(has_obs) {
     "    # shape at every cutoff.\n",
     "    X0 = x_init === nothing ? fill(1, data.n_timepoints, data.n_individuals) :\n",
     "         Matrix{Int}(x_init)\n",
+    "    pars0 = warm === nothing ? INIT_PARS : merge(INIT_PARS, warm.values)\n",
     "    reset_aggregates!(data)\n",
-    "    apply_derived_summaries!(et_params(INIT_PARS), data, X0)\n",
+    "    apply_derived_summaries!(et_params(pars0), data, X0)\n",
     "    # Every artefact is rebuilt from `data`, not taken from the module\n",
     "    # constants. SPL's latent block closes over the data it was built from, so\n",
     "    # stepping SPL here would resample all T occasions against the full\n",
@@ -829,7 +947,8 @@ lfo_fit_augmented_src <- function(has_obs) {
     "    m = et_the_model(data, et_loglik_for(data)",
     if (has_obs) ", et_obsloglik_for(data)" else "", ")\n",
     "    spl = et_sampler_for(data, et_latent_for(data))\n",
-    "    init = (; X=X0, INIT_PARS...)\n",
+    lfo_warm_sampler_src,
+    "    init = (; X=X0, pars0...)\n",
     "    # Stepped BY HAND, exactly as et_collect_run() is: `X` must be RETAINED\n",
     "    # here (LFO needs every draw's whole trajectory to forward-simulate from),\n",
     "    # which is the opposite of a normal fit's `save_states=(X=:buffer,)`. The\n",
@@ -852,7 +971,7 @@ lfo_fit_augmented_src <- function(has_obs) {
     "        k += 1\n",
     "        draws[k] = et_params(t); Xs[k] = copy(t.X)\n",
     "    end\n",
-    "    (draws, Xs)\n",
+    "    (draws=draws, X=Xs, sampler=lfo_sampler_state(spl, state))\n",
     "end\n")
 }
 
@@ -1204,7 +1323,7 @@ et_lfo_draws <- function(cache) {
   do.call(rbind, lapply(files, function(f) {
     raw <- JuliaCall::julia_eval(sprintf(paste0(
       "let fit = open(Serialization.deserialize, %s)\n",
-      "    draws = fit isa Tuple ? fit[1] : fit\n",
+      "    draws = ", lfo_cached_draws_src, "\n",
       "    nms = [k for (k, v) in pairs(draws[1]) if v isa Real]\n",
       "    Dict(String(n) => Float64[getproperty(d, n) for d in draws] for n in nms)\n",
       "end"), julia_string(julia_path(normalizePath(f, mustWork = TRUE)))))
@@ -1213,6 +1332,12 @@ et_lfo_draws <- function(cache) {
           draw = seq_len(nrow(d)), d)
   }))
 }
+
+# The draws in a cached fit `fit`. A fit is cached as (draws, X, sampler), or
+# from before the sampler state was kept as (draws, trajectories); a collapsed
+# fit from then is the draws alone, which destructuring would split.
+lfo_cached_draws_src <- paste0(
+  "fit isa NamedTuple ? fit.draws : fit isa Tuple ? fit[1] : fit")
 
 # The Julia half, as a pure function of nothing so it can be parse-checked
 # without a session. `%s` is the cache file path.
@@ -1226,10 +1351,8 @@ et_lfo_draws <- function(cache) {
 # ess/rhat/mcse each return a FlexiSummary wrapping a 3-D array, hence `only`.
 lfo_diagnostics_src <- function() paste0(
   "let FC = @eval(PracticalBayes, FlexiChains)\n",
-  # An augmented fit is cached as (draws, trajectories), a collapsed one as
-  # the draws alone; destructuring the latter would take its first two draws.
   "    fit = open(Serialization.deserialize, %s)\n",
-  "    draws = fit isa Tuple ? fit[1] : fit\n",
+  "    draws = ", lfo_cached_draws_src, "\n",
   "    S = length(draws)\n",
   # Scalar rates only: a vector parameter would need flattening into one column
   # per element, and nothing in these models has one.

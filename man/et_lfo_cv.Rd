@@ -21,6 +21,8 @@ et_lfo_cv(
   cutoffs = NULL,
   thin = 1L,
   fit_seed = 1000L,
+  warm_start = NULL,
+  adapt = c("step_size", "full"),
   quiet = FALSE
 )
 }
@@ -73,6 +75,21 @@ what keeps the fit, and its cache, in memory.}
 \code{fit_seed + t}. Independent chains at the same cutoffs need different
 values, and their own \code{cache} directories, since the cache is keyed on the
 cutoff alone.}
+
+\item{warm_start}{Start each refit where an earlier one ended: from its last
+parameter values, and with every HMC block on its adapted metric and step
+size. Either an earlier \code{et_lfo_cv()} result, whose fit at the same cutoff
+is used, or a file written by \code{\link[=et_lfo_save_sampler]{et_lfo_save_sampler()}}, used at every
+cutoff. The trajectory still comes from \code{x_init}. Fits of the same model
+to nearly the same data -- the same cutoff with one more condition, say --
+then need a fraction of the warm-up. A warm start changes where the chain
+begins, not what it targets, so a cached fit is still reused.}
+
+\item{adapt}{What warm-up re-learns after a warm start, over \code{n_adapts}
+sweeps: \code{"step_size"} (the default) keeps the carried metric and tunes the
+step size only; \code{"full"} re-runs the whole adaptation. With
+\code{n_adapts = 0} the carried metric and step size are used unchanged.
+Ignored without \code{warm_start}.}
 
 \item{quiet}{Suppress progress messages.}
 }

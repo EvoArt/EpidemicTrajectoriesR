@@ -70,6 +70,29 @@ test_that("a refit at cutoff t never changes a state after t", {
   expect_true(ok)
 })
 
+test_that("a warm-started refit starts on the metric and step size it is given", {
+  skip_without_julia()
+  mod <- lfo_module()
+  # With n_adapts = 0 nothing is re-learnt, so the second fit must end on
+  # exactly the tuning the first handed it.
+  ok <- in_module(mod, paste(
+    "let t = 5",
+    "    X0 = fill(2, DATA.n_timepoints, DATA.n_individuals)",
+    "    train = truncate_data(DATA, truncation(keep = (:y,)), t)",
+    "    a = et_lfo_fit(train; n_sweeps = 30, n_burn = 40, n_adapts = 40, seed = 7, x_init = X0)",
+    "    b = et_lfo_fit(train; n_sweeps = 10, seed = 8, x_init = X0,",
+    "                   warm = a.sampler, adapt = :full)",
+    "    ta, tb = a.sampler.tuning, b.sampler.tuning",
+    "    any(!isnothing, ta) && length(ta) == length(tb) &&",
+    "        all(i -> ta[i] === nothing ? tb[i] === nothing :",
+    "                 ta[i].metric == tb[i].metric && ta[i].step_size == tb[i].step_size,",
+    "            eachindex(ta)) &&",
+    "        keys(a.sampler.values) == keys(b.sampler.values) &&",
+    "        !haskey(a.sampler.values, :X)",
+    "end", sep = "\n"))
+  expect_true(ok)
+})
+
 test_that("a refit at cutoff t ignores every observation after t", {
   skip_without_julia()
   mod <- lfo_module()

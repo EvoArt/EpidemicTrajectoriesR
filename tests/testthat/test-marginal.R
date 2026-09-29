@@ -128,6 +128,32 @@ test_that("exact LFO runs on a collapsed fit, and its cells add up", {
                          L = 5L, M = 2L, granularity = "pointwise"), "whole forecast")
 })
 
+test_that("a sweep warm-started from another starts on its tuning, from memory or file", {
+  skip_without_julia()
+  m <- cjs_model(sim)
+  spec <- et_lfo_spec(truncation = et_lfo_truncation(keep = c("y", "first")),
+                      method = "exact_hmm")
+  run <- function(cutoffs = c(5L, 6L), ...)
+    et_lfo_cv(m, spec, L = 5L, M = 2L, granularity = "joint", cutoffs = cutoffs,
+              quiet = TRUE, ...)
+  cold <- run(n_sweeps = 100, n_burn = 100, n_adapts = 100)
+  f <- tempfile(fileext = ".jls")
+  expect_error(et_lfo_save_sampler(cold, f), "say which with `cutoff`")
+  et_lfo_save_sampler(cold, f, cutoff = 6L)
+  from_res  <- run(n_sweeps = 20, warm_start = cold, adapt = "full")
+  from_file <- run(n_sweeps = 20, warm_start = f, adapt = "full")
+  st <- EpidemicTrajectoriesR:::lfo_sampler_dict_src
+  same <- function(a, ta, b, tb) JuliaCall::julia_eval(sprintf(
+    "let x = %s[%d].tuning, y = %s[%d].tuning; any(!isnothing, x) && x == y end",
+    st(a), ta, st(b), tb))
+  # n_adapts = 0: each warm fit ends on exactly the tuning it was handed.
+  for (t in 5:6) expect_true(same(from_res, t, cold, t))
+  for (t in 5:6) expect_true(same(from_file, t, cold, 6L))
+  expect_false(same(cold, 5L, cold, 6L))
+  expect_error(run(cutoffs = 7L, n_sweeps = 20, warm_start = cold),
+               "no fit at cutoff 7")
+})
+
 test_that("an extra named like a Base function cannot shadow generated code", {
   # The CJS fixture has an extra called `first`; the generated helpers must
   # still reach Base.first, Base.time and friends.
