@@ -2,7 +2,7 @@
 % Please edit documentation in R/session.R
 \name{et_julia_project}
 \alias{et_julia_project}
-\title{The pinned Julia project shipped with this package.}
+\title{The Julia project a session activates.}
 \usage{
 et_julia_project()
 }
@@ -10,5 +10,7 @@ et_julia_project()
 A path.
 }
 \description{
-The pinned Julia project shipped with this package.
+The environment variable \code{ETR_JULIA_PROJECT} when set, so a cluster job can
+point every script at one isolated environment; otherwise the pinned project
+shipped with this package.
 }
