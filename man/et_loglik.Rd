@@ -19,7 +19,7 @@ all.}
 }
 \value{
 A named numeric vector with an \code{epidemic} and (if any) \code{observation}
-entry.
+entry; for a \code{likelihood = "marginal"} model, the one \code{marginal} entry.
 }
 \description{
 A cheap structural check that needs no sampling: it loads the generated

@@ -9,7 +9,9 @@ new_ctx(
   vector_result = FALSE,
   state_syms = FALSE,
   states = character(),
-  reads = NULL
+  reads = NULL,
+  state_codes = FALSE,
+  typed_list = FALSE
 )
 }
 \arguments{
@@ -27,6 +29,11 @@ against \code{X[...]} the state's integer code.}
 compared against the trajectory to its code.}
 
 \item{reads}{An environment accumulating the \code{model$x} names read.}
+
+\item{state_codes}{\code{TRUE} where the body becomes a plain Julia function
+rather than an \verb{@aggregate} line: \code{state} then arrives as the integer code,
+and no macro is there to turn a Symbol into one, so a name compared against
+\code{state} must be emitted as its code too.}
 }
 \description{
 Create a transpiler context.

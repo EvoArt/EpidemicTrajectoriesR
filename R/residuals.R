@@ -162,6 +162,7 @@ et_residuals <- function(fit, residuals, sync_aggregates = TRUE, seed = 1) {
   if (!inherits(fit, "et_fit")) {
     stop("et_residuals(): `fit` must come from et_sample().", call. = FALSE)
   }
+  require_augmented(fit$model, "et_residuals()")
   if (is.null(fit$x_path)) {
     stop("et_residuals(): this fit did not archive its trajectories, so there is ",
          "nothing to score. Re-run et_sample() with `save_x = \"X.jld2\"`.",

@@ -8,7 +8,8 @@ et_adaptive_hmc(
   vars,
   target_accept = 0.8,
   n_steps = 15,
-  metric = c("diagonal", "dense", "unit")
+  metric = c("diagonal", "dense", "unit"),
+  jitter = FALSE
 )
 }
 \arguments{
@@ -22,6 +23,12 @@ et_adaptive_hmc(
 metric learns correlations between parameters, at the cost of estimating
 many more entries during warm-up, worth it when the posterior is strongly
 correlated and you can afford a long warm-up.}
+
+\item{jitter}{Redraw the number of leapfrog steps uniformly from
+\code{1:n_steps} at every iteration instead of fixing it. A fixed length can
+resonate with a periodic posterior and crawl; jittering breaks that, and
+costs \code{(n_steps + 1) / 2} gradients per iteration on average, so pair it
+with a larger \code{n_steps} (e.g. 30 for the cost of a fixed 15).}
 }
 \value{
 An \code{et_block}.

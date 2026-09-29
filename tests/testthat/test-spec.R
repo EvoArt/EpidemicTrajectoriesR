@@ -84,6 +84,24 @@ test_that("a guarded aggregate keeps its guard", {
                "if data.g[i, t] > 0\n    n[data.g[i, t], t] += (state == :I)\nend")
 })
 
+test_that("an if around several updates guards each one separately", {
+  # ET's @aggregate takes one update per guarded line.
+  a <- et_aggregate(
+    c("S", "I"),
+    arrays = list(n = et_array("Int", c(2, 2)), m = et_array("Int", c(2, 2))),
+    update = function(model, data, X, state, i, t) {
+      if (t > 1) {
+        n[1, t] <- n[1, t] + (state == "I")
+        if (i > 2) {
+          m[1, t] <- m[1, t] + 1
+        }
+      }
+    })
+  expect_equal(a$lines, c(
+    "if t > 1\n    n[1, t] += (state == :I)\nend",
+    "if (t > 1) && (i > 2)\n    m[1, t] += 1\nend"))
+})
+
 test_that("a multiplicative aggregate emits *=", {
   a <- et_aggregate(
     c("S", "I"),

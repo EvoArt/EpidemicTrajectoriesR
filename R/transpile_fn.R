@@ -7,7 +7,16 @@
   survival       = list(args = c("model", "data", "i", "t"),           vector = FALSE),
   starting_state = list(args = c("model", "data", "X", "i", "t"),      vector = TRUE),
   obs_process    = list(args = c("model", "data", "X", "i", "t"),      vector = TRUE),
-  obs_weight     = list(args = c("model", "data", "X", "i", "t", "s"), vector = FALSE)
+  obs_weight     = list(args = c("model", "data", "X", "i", "t", "s"), vector = FALSE),
+  # Quantities computed once per (i, t) and handed to every rate, or every
+  # state's observation weight, as `shared`. It returns a list(), so its return
+  # is left as written rather than converted to the parameter scalar type.
+  shared         = list(args = c("model", "data", "i", "t"),           vector = FALSE,
+                        keep_return = TRUE),
+  rate_shared    = list(args = c("model", "data", "i", "t", "shared"), vector = FALSE),
+  survival_shared = list(args = c("model", "data", "i", "t", "shared"), vector = FALSE),
+  obs_weight_shared = list(args = c("model", "data", "X", "i", "t", "s", "shared"),
+                           vector = FALSE)
 )
 
 #' The call protocols a user function can be transpiled into.
@@ -90,7 +99,12 @@ print.et_helper <- function(x, ...) {
 #   src    - the Julia `function ... end` text
 #   reads  - the model parameter names the body reads (transitively via helpers)
 #   opaque - TRUE if the body could not be scanned (an et_julia without `reads`)
-et_transpile_role <- function(f, role, name, helpers = list()) {
+#
+# `extra_reads` are parameters the body depends on without naming them: for a
+# rate that reads `shared`, whatever the shared step function reads. They enter
+# the element-type prologue and the returned reads alike.
+et_transpile_role <- function(f, role, name, helpers = list(),
+                              extra_reads = character()) {
   spec <- .et_protocols[[role]]
   if (is.null(spec)) {
     stop("unknown role '", role, "'. One of: ",
@@ -102,7 +116,7 @@ et_transpile_role <- function(f, role, name, helpers = list()) {
   if (inherits(f, "et_julia")) {
     src <- sprintf("function %s(%s)\n%s\nend", name,
                    paste(spec$args, collapse = ", "), indent(f$src))
-    return(list(src = src, reads = f$reads %||% character(),
+    return(list(src = src, reads = union(f$reads %||% character(), extra_reads),
                 opaque = is.null(f$reads), helpers = character()))
   }
   if (!is.function(f)) {
@@ -111,21 +125,22 @@ et_transpile_role <- function(f, role, name, helpers = list()) {
   }
   check_protocol_formals(f, spec$args, role, name)
 
-  ctx <- new_ctx(helpers = helper_names, vector_result = spec$vector)
+  ctx <- new_ctx(helpers = helper_names, vector_result = spec$vector,
+                 typed_list = isTRUE(spec$keep_return))
   # A scalar role must return one concrete type. An R body naturally mixes
   # `return(1)` (an Int) with `return(1 - eta)` (whatever the parameters are),
   # which makes the Julia return type a Union, runtime dispatch in the hottest
   # function in the package. Converting every returned value to `ETR_T` fixes it
   # without the user having to think about it, and `ETR_T` is the promotion of
   # exactly the parameters this body reads.
-  fbody <- if (spec$vector) body(f) else wrap_returns_in_T(body(f))
+  fbody <- if (spec$vector || isTRUE(spec$keep_return)) body(f) else wrap_returns_in_T(body(f))
   body_src <- transpile_braced_body(fbody, ctx)
   reads <- ctx$reads$model
   used_helpers <- ctx$reads$helpers
 
   # Reads reached through helpers count too, that transitivity is exactly what
   # makes an automatically derived `depends=` trustworthy.
-  reads <- union(reads, helper_reads(used_helpers, helpers))
+  reads <- union(union(reads, helper_reads(used_helpers, helpers)), extra_reads)
   opaque <- any(vapply(helpers[helper_names %in% helper_closure(used_helpers, helpers)],
                        function(h) inherits(h$f, "et_julia") && is.null(h$f$reads),
                        logical(1)))

@@ -58,7 +58,7 @@ test_that("payload bindings carry an EXPLICIT element type", {
   # array: an R integer can arrive as Int32, a one-column matrix as a vector.
   s <- src_of()
   expect_match(s, "const y = Matrix{Int}(Main.", fixed = TRUE)
-  expect_match(s, "const group = Vector{Int}(vec(Main.", fixed = TRUE)
+  expect_match(s, "const group = Vector{Int}(Base.vec(Main.", fixed = TRUE)
 })
 
 test_that("payload names are namespaced by module, so two models cannot collide", {

@@ -116,3 +116,14 @@ et_add_ad_backend <- function(backends) {
   }
   invisible(TRUE)
 }
+
+# The backend a marginal-likelihood model gets when the caller leaves the
+# default. Forward mode costs one pass over the likelihood per chunk, and
+# ForwardDiff's own chunk (at most 12) splits a 25-parameter model into three:
+# measured on a 25-parameter, 10-state model, one pass is twice as fast. So
+# the chunk covers every parameter, in balanced chunks of at most 32.
+default_adtype <- function(model, adtype) {
+  if (!is_marginal(model) || !identical(adtype, "forwarddiff")) return(adtype)
+  n <- sum(vapply(model$par_names, function(nm) par_length(model, nm), numeric(1)))
+  et_adtype("forwarddiff", chunksize = ceiling(n / ceiling(n / 32)))
+}

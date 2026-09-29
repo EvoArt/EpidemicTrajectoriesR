@@ -18,6 +18,12 @@
 #'   only one entry, so the scalar avoids allocating a weight vector per cell
 #'   under AD. Supply either or both; see ET's `epidemic_data` docs for when both
 #'   are needed.
+#' @param observation_shared Optional function `(model, data, i, t)` returning a
+#'   `list()` of named quantities every state's weight needs (a detection
+#'   probability, a test's sensitivity), computed once per individual and
+#'   timepoint. `observation_weight` then takes a seventh argument, `shared`:
+#'   `(model, data, X, i, t, s, shared)`. The observation counterpart of
+#'   [et_transitions()]'s `shared`.
 #' @param likelihood_weight A function `(model, data, X, i, t, s)` giving the
 #'   observation factor scored in the LIKELIHOOD, when that differs from the
 #'   filter's `observation_weight`. This is ET's seam for keeping some
@@ -49,6 +55,7 @@
 et_data <- function(n_individuals, n_timepoints, transitions, starting_state,
                     aggregates, group = NULL,
                     observation_process = NULL, observation_weight = NULL,
+                    observation_shared = NULL,
                     likelihood_weight = NULL, sampling_period = NULL, affected_individuals = NULL,
                     coupled_transitions = NULL, coupling_transitions = NULL,
                     rest_contribution = NULL, focal_self_contribution = TRUE,
@@ -75,6 +82,10 @@ et_data <- function(n_individuals, n_timepoints, transitions, starting_state,
     stop("et_data(): `likelihood_weight` replaces the likelihood's factor of an ",
          "observation process that the FILTER still needs in full. Supply ",
          "`observation_weight` (or `observation_process`) as well.", call. = FALSE)
+  }
+  if (!is.null(observation_shared) && is.null(observation_weight)) {
+    stop("et_data(): `observation_shared` is handed to `observation_weight`, ",
+         "which was not given.", call. = FALSE)
   }
   if (is.null(observation_process) && is.null(observation_weight)) {
     message("et_data(): no observation process given -- the model will have no ",
@@ -136,6 +147,7 @@ et_data <- function(n_individuals, n_timepoints, transitions, starting_state,
     aggregates = aggregates, group = group,
     observation_process = observation_process,
     observation_weight = observation_weight,
+    observation_shared = observation_shared,
     likelihood_weight = likelihood_weight,
     sampling_period = sampling_period,
     affected_individuals = affected_individuals,

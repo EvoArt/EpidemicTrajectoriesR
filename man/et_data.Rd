@@ -13,6 +13,7 @@ et_data(
   group = NULL,
   observation_process = NULL,
   observation_weight = NULL,
+  observation_shared = NULL,
   likelihood_weight = NULL,
   sampling_period = NULL,
   affected_individuals = NULL,
@@ -45,6 +46,13 @@ scalar weight for state \code{s}. \strong{This is the fast form}: the likelihood
 only one entry, so the scalar avoids allocating a weight vector per cell
 under AD. Supply either or both; see ET's \code{epidemic_data} docs for when both
 are needed.}
+
+\item{observation_shared}{Optional function \verb{(model, data, i, t)} returning a
+\code{list()} of named quantities every state's weight needs (a detection
+probability, a test's sensitivity), computed once per individual and
+timepoint. \code{observation_weight} then takes a seventh argument, \code{shared}:
+\verb{(model, data, X, i, t, s, shared)}. The observation counterpart of
+\code{\link[=et_transitions]{et_transitions()}}'s \code{shared}.}
 
 \item{likelihood_weight}{A function \verb{(model, data, X, i, t, s)} giving the
 observation factor scored in the LIKELIHOOD, when that differs from the

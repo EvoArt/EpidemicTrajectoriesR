@@ -109,7 +109,11 @@ et_aggregates <- function(states, arrays, update = NULL) {
     # lines; `aggregate_records` returns the same updates in pieces, so the
     # fallback path can emit them as standalone functions.
     lines <- parse_aggregate_body(body(update), derived_names, ctx)
-    records <- aggregate_records(body(update), derived_names, ctx)
+    # The records become plain functions (the fallback path), where `state` is
+    # the integer code and no macro translates a state name: emit codes.
+    records <- aggregate_records(body(update), derived_names,
+                                 new_ctx(state_syms = TRUE, states = states,
+                                         reads = ctx$reads, state_codes = TRUE))
     reads <- ctx$reads$model
   } else if (!is.null(update)) {
     stop("et_aggregates(): `update` was given but every array is an ",
@@ -140,7 +144,9 @@ et_transpile_summary <- function(name, spec, states, helpers = list(),
       opaque = is.null(spec$update$reads)))
   }
   helper_names <- vapply(helpers, function(h) h$name, character(1))
-  ctx <- new_ctx(helpers = helper_names, state_syms = TRUE, states = states)
+  # A plain function: `state` arrives as the integer code (see transpile_binop).
+  ctx <- new_ctx(helpers = helper_names, state_syms = TRUE, states = states,
+                 state_codes = TRUE)
   # A tracked array is written as a bare name (the vocabulary `@aggregate`
   # establishes); ET sees this function directly, so the qualification the macro
   # would have done has to happen here.
