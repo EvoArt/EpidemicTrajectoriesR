@@ -118,7 +118,7 @@ et_convert_trajectories <- function(template, keep_jld2 = FALSE, quiet = FALSE) 
 #' a time without ever materialising the run, so pass `draws` unless the
 #' archive is small.
 #'
-#' @param fit An [et_fit()] from [et_sample()] run with `save_x =`, or a path
+#' @param fit An `et_fit` object from [et_sample()] run with `save_x =`, or a path
 #'   template.
 #' @param draws Which archived draws to read (indices into the archive, in sweep
 #'   order). Defaults to all of them.

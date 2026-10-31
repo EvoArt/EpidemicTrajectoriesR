@@ -15,7 +15,7 @@ et_reproduction_numbers(
 )
 }
 \arguments{
-\item{fit}{An \code{\link[=et_fit]{et_fit()}} from \code{\link[=et_sample]{et_sample()}} run with \verb{save_x =}.}
+\item{fit}{An \code{et_fit} object from \code{\link[=et_sample]{et_sample()}} run with \verb{save_x =}.}
 
 \item{components}{Named list of rate functions, the force-of-infection
 decomposition. Each is written in the same R subset as any other rate

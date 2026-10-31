@@ -144,7 +144,7 @@ survival_src <- function(x) {
 #' Requires the fit to have been run with `save_x =`. Computing residuals
 #' post-hoc means they can be recomputed, or new ones added, without refitting.
 #'
-#' @param fit An [et_fit()] from [et_sample()] run with `save_x =`.
+#' @param fit An `et_fit` object from [et_sample()] run with `save_x =`.
 #' @param residuals List of [et_residual_survival()] / [et_residual_waiting()].
 #' @param sync_aggregates Rebuild the tracked arrays for each draw before scoring
 #'   it. Needed when any rate reads `data$aggregates`: a spec-derived hazard

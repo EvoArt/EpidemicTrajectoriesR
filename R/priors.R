@@ -20,6 +20,8 @@ new_dist <- function(name, args, vector_arg = FALSE) {
 #' @param d A distribution to truncate.
 #' @param lower,upper Truncation bounds; `NA` for unbounded on that side.
 #' @param name,args Escape hatch: a Julia distribution name and its arguments.
+#' @param ... For the deprecated `et_*()` spellings, passed on to the
+#'   replacement.
 #' @return An object of class `custom_dist`.
 #' @name prior_distributions
 NULL

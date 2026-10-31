@@ -810,7 +810,6 @@ eligible_src <- function(eligible) {
 }
 
 conjugate_src <- function(model, b) {
-  fam <- if (b$family == "beta") "Beta" else "Dirichlet"
   prior <- if (b$family == "beta") {
     sprintf("Beta(%s, %s)", julia_float(b$prior[1]), julia_float(b$prior[2]))
   } else {

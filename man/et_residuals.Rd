@@ -7,7 +7,7 @@
 et_residuals(fit, residuals, sync_aggregates = TRUE, seed = 1)
 }
 \arguments{
-\item{fit}{An \code{\link[=et_fit]{et_fit()}} from \code{\link[=et_sample]{et_sample()}} run with \verb{save_x =}.}
+\item{fit}{An \code{et_fit} object from \code{\link[=et_sample]{et_sample()}} run with \verb{save_x =}.}
 
 \item{residuals}{List of \code{\link[=et_residual_survival]{et_residual_survival()}} / \code{\link[=et_residual_waiting]{et_residual_waiting()}}.}
 

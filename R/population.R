@@ -31,7 +31,7 @@
 #' @param thin Score every `thin`-th sweep. Defaults to spreading `n_keep` draws
 #'   over the whole run.
 #' @param quiet Suppress progress messages.
-#' @return A list with `fit` (an [et_fit()], without an archive) and `residuals`
+#' @return A list with `fit` (an `et_fit` object, without an archive) and `residuals`
 #'   (the same data frame [et_residuals()] returns).
 #' @export
 et_collect <- function(model, blocks = list(), residuals,
@@ -146,7 +146,7 @@ residual_frame <- function(raw, names_v) {
 #' opportunity to infect anyone, which differs from having had the opportunity
 #' and infected nobody (a genuine `0`).
 #'
-#' @param fit An [et_fit()] from [et_sample()] run with `save_x =`.
+#' @param fit An `et_fit` object from [et_sample()] run with `save_x =`.
 #' @param components Named list of rate functions, the force-of-infection
 #'   decomposition. Each is written in the same R subset as any other rate
 #'   function, taking `(model, data, i, t)`.

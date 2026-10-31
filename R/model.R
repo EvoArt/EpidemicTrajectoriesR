@@ -13,6 +13,7 @@
 #'   `"latent"` for one **owned by a conjugate kernel**: emitted as a
 #'   placeholder distribution whose density is constant, exactly as the badger
 #'   model's `nu` is.
+#' @param ... For the deprecated `et_par()`, passed on to `prior()`.
 #' @return An object of class `prior`.
 #' @export
 #' @examples

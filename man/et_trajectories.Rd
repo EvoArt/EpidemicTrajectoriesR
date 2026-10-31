@@ -7,7 +7,7 @@
 et_trajectories(fit, draws = NULL)
 }
 \arguments{
-\item{fit}{An \code{\link[=et_fit]{et_fit()}} from \code{\link[=et_sample]{et_sample()}} run with \verb{save_x =}, or a path
+\item{fit}{An \code{et_fit} object from \code{\link[=et_sample]{et_sample()}} run with \verb{save_x =}, or a path
 template.}
 
 \item{draws}{Which archived draws to read (indices into the archive, in sweep

@@ -70,6 +70,9 @@ likely thing for an R user to get backwards.}
 \item{lower, upper}{Truncation bounds; \code{NA} for unbounded on that side.}
 
 \item{name, args}{Escape hatch: a Julia distribution name and its arguments.}
+
+\item{...}{For the deprecated \verb{et_*()} spellings, passed on to the
+replacement.}
 }
 \value{
 An object of class \code{custom_dist}.

@@ -25,6 +25,8 @@ emitted as \code{PracticalBayes.filldist(dist, n)}.}
 \code{"latent"} for one \strong{owned by a conjugate kernel}: emitted as a
 placeholder distribution whose density is constant, exactly as the badger
 model's \code{nu} is.}
+
+\item{...}{For the deprecated \code{et_par()}, passed on to \code{prior()}.}
 }
 \value{
 An object of class \code{prior}.

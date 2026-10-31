@@ -37,7 +37,7 @@ over the whole run.}
 \item{quiet}{Suppress progress messages.}
 }
 \value{
-A list with \code{fit} (an \code{\link[=et_fit]{et_fit()}}, without an archive) and \code{residuals}
+A list with \code{fit} (an \code{et_fit} object, without an archive) and \code{residuals}
 (the same data frame \code{\link[=et_residuals]{et_residuals()}} returns).
 }
 \description{
