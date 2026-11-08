@@ -519,7 +519,7 @@ weakdeps = ["Adapt", "ChainRulesCore"]
 
 [[deps.EpidemicTrajectories]]
 deps = ["Distributions", "LinearAlgebra", "Random", "Serialization", "StatsFuns"]
-git-tree-sha1 = "690bcfb77604ac3b39365fd4fc07386182f2c9d5"
+git-tree-sha1 = "3d600b2805581823b5f61f3c62ceaa96963a76f0"
 repo-rev = "master"
 repo-url = "https://github.com/EvoArt/EpidemicTrajectories.git"
 uuid = "7100e41f-98d3-4508-a32b-553d87bf8b28"
