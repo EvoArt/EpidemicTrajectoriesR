@@ -23,8 +23,8 @@ emitted as \code{PracticalBayes.filldist(dist, n)}.}
 
 \item{kind}{\code{"sampled"} (the default) for a parameter with a prior, or
 \code{"latent"} for one \strong{owned by a conjugate kernel}: emitted as a
-placeholder distribution whose density is constant, exactly as the badger
-model's \code{nu} is.}
+placeholder distribution whose density is constant, such as an initial
+infection probability updated by its own kernel.}
 
 \item{...}{For the deprecated \code{et_par()}, passed on to \code{prior()}.}
 }

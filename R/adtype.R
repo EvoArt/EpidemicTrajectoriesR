@@ -1,4 +1,4 @@
-# AD backend selection. The gradient is around 83% of a badger sweep, so this
+# AD backend selection. The gradient is around 83% of a sweep on a large model, so this
 # is one of the few knobs that really matters.
 
 .et_ad_backends <- list(
@@ -23,7 +23,7 @@
 #' the value, so during a gradient every parameter is a `ForwardDiff.Dual`. Cost
 #' scales with the number of chunk passes over the parameters, which makes it
 #' strong for small blocks and weak for large ones. `polyester` is the threaded
-#' variant and is what the badger model was tuned with.
+#' variant, and the one to use on large models.
 #'
 #' **Reverse mode** (`mooncake`, `enzyme`, `reversediff`) computes all partials
 #' in one reverse pass, so it does not care how many parameters a block has --

@@ -1,6 +1,6 @@
 # Hand-written reversible summaries, for updates et_aggregate() cannot derive
 # ones whose contribution depends on something the `A[i] <- A[i] + x` shape
-# does not expose, such as the badger coupling counts, which depend on where
+# does not expose, such as coupling counts, which depend on where
 # the individual goes at t+1.
 #
 # Forward update then reverse must leave the aggregates exactly as they were.

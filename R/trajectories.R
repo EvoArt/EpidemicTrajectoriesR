@@ -78,7 +78,7 @@ et_convert_trajectories <- function(template, keep_jld2 = FALSE, quiet = FALSE) 
   out <- character(length(src))
   for (k in seq_along(src)) {
     dest <- et_with_ext(src[k], "rds")
-    # One chunk at a time: a badger flush of 100 sweeps is ~307 MB, and the
+    # One chunk at a time: on a large model a flush of 100 sweeps is ~307 MB, and the
     # whole point is never to hold the run at once.
     # Stacked to a 3-D array (time x individual x draw) on the Julia side. A
     # `Vector{Matrix}` comes back as an opaque `JuliaObject` rather than a list

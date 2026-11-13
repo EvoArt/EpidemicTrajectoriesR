@@ -31,7 +31,7 @@ Choose the automatic-differentiation backend.
 the value, so during a gradient every parameter is a \code{ForwardDiff.Dual}. Cost
 scales with the number of chunk passes over the parameters, which makes it
 strong for small blocks and weak for large ones. \code{polyester} is the threaded
-variant and is what the badger model was tuned with.
+variant, and the one to use on large models.
 
 \strong{Reverse mode} (\code{mooncake}, \code{enzyme}, \code{reversediff}) computes all partials
 in one reverse pass, so it does not care how many parameters a block has --

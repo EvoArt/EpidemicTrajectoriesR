@@ -11,8 +11,8 @@
 #' @param dim Dimensions of a matrix-valued parameter (`kind = "latent"` only).
 #' @param kind `"sampled"` (the default) for a parameter with a prior, or
 #'   `"latent"` for one **owned by a conjugate kernel**: emitted as a
-#'   placeholder distribution whose density is constant, exactly as the badger
-#'   model's `nu` is.
+#'   placeholder distribution whose density is constant, such as an initial
+#'   infection probability updated by its own kernel.
 #' @param ... For the deprecated `et_par()`, passed on to `prior()`.
 #' @return An object of class `prior`.
 #' @export

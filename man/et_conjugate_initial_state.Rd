@@ -33,6 +33,5 @@ individuals; defaults to all.}
 An \code{et_block}.
 }
 \description{
-Wraps \code{PracticalEpiBayes::initial_state_kernel} (the cattle \code{nu}, the badger
-\code{nu}).
+Wraps \code{PracticalEpiBayes::initial_state_kernel} (the cattle \code{nu}).
 }

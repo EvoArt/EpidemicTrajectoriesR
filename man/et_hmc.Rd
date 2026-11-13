@@ -19,7 +19,7 @@ Becomes the diagonal metric \code{DiagEuclideanMetric(step_size^2)}.}
 An \code{et_block}.
 }
 \description{
-The badger model uses this rather than NUTS, with a hand-tuned diagonal
-metric. \code{n_steps = 15} matches the C++ reference's EXPECTED trajectory length
-(it draws L uniformly on 1..30, mean 15.5), not its nominal \code{L = 30}.
+Large models can use this rather than NUTS, with a hand-tuned diagonal
+metric. The default \code{n_steps = 15} is the mean length of a trajectory whose
+length is drawn uniformly on 1..30.
 }

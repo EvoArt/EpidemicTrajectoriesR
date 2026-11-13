@@ -1,7 +1,7 @@
 # Tier 1: the derived `depends=` annotations.
 #
 # PracticalBayes' `depends=` is the largest measured speed-up in the stack
-# (1.96x on 89% of badger runtime) and its one hazard is that UNDER-declaring is
+# (1.96x on 89% of a large model's runtime) and its one hazard is that UNDER-declaring is
 # silent: a real gradient contribution is dropped with no error and no warning.
 # This package derives the annotation from the transpiled bodies rather than
 # asking for it, so these tests are the guard on that derivation.

@@ -139,9 +139,6 @@ that means a different thing in Julia.
 
 - `inst/examples/cattle.R` — the model above, end to end, recovering the truth
   from simulated data.
-- `inst/examples/badger.R` — a badger bovine-TB SEID model: 2384 individuals x
-  161 quarters, six diagnostic tests, capture-recapture observation,
-  time-varying social groups and Gompertz-Makeham survival.
 
 ## Licence
 

@@ -29,8 +29,8 @@ specification is identical. If you learn it in one language you have learned it
 in the other, and a model prototyped in R can graduate to Julia without being
 rethought.
 
-The model is deliberately small and readable. Where the badger document
-optimises, this one does not: it is about how little you have to write.
+The model is deliberately small and readable. It does not optimise anything: it
+is about how little you have to write.
 
 ### The model
 
@@ -524,9 +524,6 @@ something very close to the Julia on the right.
 
 ## Where to go next
 
-* **[The badger model](badger.qmd)** — the same ideas at scale: 2384 individuals,
-  four states, six tests, capture-recapture observation, survival, and the
-  performance seams this document deliberately ignores.
 * `et_check_depends()` — verifies the dependency annotations that let each Gibbs
   block skip likelihood terms it cannot move.
 * `et_residuals()` — post-hoc PIT residuals for the mechanisms in your model,

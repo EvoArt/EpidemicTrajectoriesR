@@ -110,7 +110,7 @@ residual_to_julia <- function(r, states) {
 # A per-individual time: the name of an extras vector, or a literal vector.
 #
 # `max(..., 1)` because a clock origin can legitimately predate the observation
-# window (a badger born before monitoring began), while the arrays the survival
+# window (an animal born before monitoring began), while the arrays the survival
 # function indexes only exist over `1:n_timepoints`. The age is still right --
 # `age[i, t]` is `t - birth[i]`, so an individual born earlier is simply older at
 # t = 1, but the product has to start inside the array.

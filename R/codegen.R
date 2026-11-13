@@ -375,7 +375,7 @@ julia_usings <- function() paste(
   "using Distributions",
   "using Random: AbstractRNG",
   # PracticalBayes re-exports HMC/NUTS but not the integrator or the metric, and
-  # a hand-tuned diagonal metric is the badger model's whole HMC configuration.
+  # a hand-tuned diagonal metric can be a model's whole HMC configuration.
   "using AdvancedHMC: Leapfrog, DiagEuclideanMetric",
   "using StableRNGs: StableRNG",
   "import AbstractMCMC",
@@ -910,7 +910,7 @@ run_src_for <- function(model, has_obs) {
     "# trajectory, not under a single fixed set.\n",
     "# `files` are the per-flush chunks in sweep order, discovered R-side (which\n",
     "# also knows the format). They are read ONE AT A TIME: `read_states` would\n",
-    "# stitch the whole run into memory, which on the badger model is ~15 GB and\n",
+    "# stitch the whole run into memory, which on a large model is ~15 GB and\n",
     "# segfaults -- its own docstring says to prefer one flush at a time.\n",
     "#\n",
     "# The result is a LAZY iterator, so only the current chunk is ever resident.\n",

@@ -126,7 +126,7 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 <h2 class="anchored" data-anchor-id="what-this-document-is">What this document is</h2>
 <p>One small model, written twice: once in R, once in Julia. Every code block below has both, and <strong>the tabs are the same model</strong> — pick whichever language you work in.</p>
 <p>The point is not that the two look similar (they do), but that the <em>shape</em> of the specification is identical. If you learn it in one language you have learned it in the other, and a model prototyped in R can graduate to Julia without being rethought.</p>
-<p>The model is deliberately small and readable. Where the badger document optimises, this one does not: it is about how little you have to write.</p>
+<p>The model is deliberately small and readable. It does not optimise anything: it is about how little you have to write.</p>
 <section id="the-model" class="level3">
 <h3 class="anchored" data-anchor-id="the-model">The model</h3>
 <p>Two states, <code>S</code> and <code>I</code>, with recurrent <code>S ⇄ I</code>. An animal is infected at a rate driven by how many of its penmates are infected, and recovers back to susceptible.</p>
@@ -580,7 +580,6 @@ m       6.2078 0.8380 4.7773 6.1505 8.0649</code></pre>
 <section id="where-to-go-next" class="level2">
 <h2 class="anchored" data-anchor-id="where-to-go-next">Where to go next</h2>
 <ul>
-<li><strong><a href="badger.qmd">The badger model</a></strong> — the same ideas at scale: 2384 individuals, four states, six tests, capture-recapture observation, survival, and the performance seams this document deliberately ignores.</li>
 <li><code>et_check_depends()</code> — verifies the dependency annotations that let each Gibbs block skip likelihood terms it cannot move.</li>
 <li><code>et_residuals()</code> — post-hoc PIT residuals for the mechanisms in your model, which is how you find out whether any of this fitted well.</li>
 </ul>
@@ -1089,8 +1088,8 @@ window.document.addEventListener("DOMContentLoaded", function (event) {
 <span id="cb23-29"><a href="#cb23-29" aria-hidden="true" tabindex="-1"></a>in the other, and a model prototyped in R can graduate to Julia without being</span>
 <span id="cb23-30"><a href="#cb23-30" aria-hidden="true" tabindex="-1"></a>rethought.</span>
 <span id="cb23-31"><a href="#cb23-31" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb23-32"><a href="#cb23-32" aria-hidden="true" tabindex="-1"></a>The model is deliberately small and readable. Where the badger document</span>
-<span id="cb23-33"><a href="#cb23-33" aria-hidden="true" tabindex="-1"></a>optimises, this one does not: it is about how little you have to write.</span>
+<span id="cb23-32"><a href="#cb23-32" aria-hidden="true" tabindex="-1"></a>The model is deliberately small and readable. It does not optimise anything: it</span>
+<span id="cb23-33"><a href="#cb23-33" aria-hidden="true" tabindex="-1"></a>is about how little you have to write.</span>
 <span id="cb23-34"><a href="#cb23-34" aria-hidden="true" tabindex="-1"></a></span>
 <span id="cb23-35"><a href="#cb23-35" aria-hidden="true" tabindex="-1"></a><span class="fu">### The model</span></span>
 <span id="cb23-36"><a href="#cb23-36" aria-hidden="true" tabindex="-1"></a></span>
@@ -1584,9 +1583,6 @@ window.document.addEventListener("DOMContentLoaded", function (event) {
 <span id="cb23-546"><a href="#cb23-546" aria-hidden="true" tabindex="-1"></a></span>
 <span id="cb23-547"><a href="#cb23-547" aria-hidden="true" tabindex="-1"></a><span class="fu">## Where to go next</span></span>
 <span id="cb23-548"><a href="#cb23-548" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb23-549"><a href="#cb23-549" aria-hidden="true" tabindex="-1"></a><span class="ss">* </span>**[The badger model](badger.qmd)** — the same ideas at scale: 2384 individuals,</span>
-<span id="cb23-550"><a href="#cb23-550" aria-hidden="true" tabindex="-1"></a>  four states, six tests, capture-recapture observation, survival, and the</span>
-<span id="cb23-551"><a href="#cb23-551" aria-hidden="true" tabindex="-1"></a>  performance seams this document deliberately ignores.</span>
 <span id="cb23-552"><a href="#cb23-552" aria-hidden="true" tabindex="-1"></a><span class="ss">* </span><span class="in">`et_check_depends()`</span> — verifies the dependency annotations that let each Gibbs</span>
 <span id="cb23-553"><a href="#cb23-553" aria-hidden="true" tabindex="-1"></a>  block skip likelihood terms it cannot move.</span>
 <span id="cb23-554"><a href="#cb23-554" aria-hidden="true" tabindex="-1"></a><span class="ss">* </span><span class="in">`et_residuals()`</span> — post-hoc PIT residuals for the mechanisms in your model,</span>

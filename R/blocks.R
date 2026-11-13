@@ -22,9 +22,9 @@ et_nuts <- function(vars, target_accept = 0.8) {
 
 #' A fixed-trajectory HMC block.
 #'
-#' The badger model uses this rather than NUTS, with a hand-tuned diagonal
-#' metric. `n_steps = 15` matches the C++ reference's EXPECTED trajectory length
-#' (it draws L uniformly on 1..30, mean 15.5), not its nominal `L = 30`.
+#' Large models can use this rather than NUTS, with a hand-tuned diagonal
+#' metric. The default `n_steps = 15` is the mean length of a trajectory whose
+#' length is drawn uniformly on 1..30.
 #'
 #' @param vars Character vector of parameter names sampled together.
 #' @param n_steps Leapfrog steps per trajectory.
@@ -145,7 +145,7 @@ et_conjugate_test_sensitivity <- function(name, y, infected_state,
 
 #' Conjugate Beta kernel for a per-index capture probability.
 #'
-#' Wraps `PracticalEpiBayes::capture_prob_kernel` (the badger `etas`).
+#' Wraps `PracticalEpiBayes::capture_prob_kernel`.
 #'
 #' @param name Parameter name.
 #' @param caught,effort,group,index Names of entries in `extras`: capture history
@@ -172,8 +172,7 @@ et_conjugate_capture_prob <- function(name, caught, effort, group, index,
 
 #' Conjugate Dirichlet kernel for the initial-state mixing of entrants.
 #'
-#' Wraps `PracticalEpiBayes::initial_state_kernel` (the cattle `nu`, the badger
-#' `nu`).
+#' Wraps `PracticalEpiBayes::initial_state_kernel` (the cattle `nu`).
 #'
 #' @param name Parameter name.
 #' @param at A single entry time, the name of an `extras` vector of entry times,
@@ -200,8 +199,8 @@ et_conjugate_initial_state <- function(name, at = 1, states, prior = NULL,
 
 #' Drop in a raw Julia Gibbs kernel.
 #'
-#' The honest answer for a bespoke MH kernel the R DSL cannot express: the
-#' badger `xi` changepoint sampler is the worked example. `src` is a Julia
+#' The honest answer for a bespoke MH kernel the R DSL cannot express: a
+#' changepoint sampler is the typical case. `src` is a Julia
 #' expression evaluated inside the generated module, where the transpiled
 #' functions, `DATA` and the extras are all in scope.
 #'

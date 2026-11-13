@@ -1,8 +1,8 @@
 # The two diagnostics that cannot go through the per-individual archive.
 #
 # et_collect() scores each draw as it is produced and keeps only the
-# residuals: about 9.5 MB per summary against ~15 GB of badger
-# trajectories. et_reproduction_numbers() needs every infective in the group
+# residuals: about 9.5 MB per summary against ~15 GB of trajectories on a
+# large model. et_reproduction_numbers() needs every infective in the group
 # at the moment of infection, so it takes a whole-population pass instead of
 # the (model, data, X, i, rng) contract the residuals use.
 
@@ -16,7 +16,7 @@
 #' `n_timepoints x n_individuals` integers every sweep, and `save_every` is a
 #' flush interval rather than thinning, so a long run over a large population
 #' archives everything. Storage here is `n_individuals x n_keep` doubles per
-#' residual instead: on the badger model ~9.5 MB per residual against ~15 GB
+#' residual instead: on a large model ~9.5 MB per residual against ~15 GB
 #' of trajectories.
 #'
 #' The trade is that the residuals must be decided before the fit. Archiving

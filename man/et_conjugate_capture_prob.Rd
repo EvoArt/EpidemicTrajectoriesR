@@ -39,5 +39,5 @@ way of conditioning on entry), those cells must not be counted here either.}
 An \code{et_block}.
 }
 \description{
-Wraps \code{PracticalEpiBayes::capture_prob_kernel} (the badger \code{etas}).
+Wraps \code{PracticalEpiBayes::capture_prob_kernel}.
 }

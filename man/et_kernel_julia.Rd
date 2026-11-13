@@ -15,8 +15,8 @@ et_kernel_julia(vars, src)
 An \code{et_block}.
 }
 \description{
-The honest answer for a bespoke MH kernel the R DSL cannot express: the
-badger \code{xi} changepoint sampler is the worked example. \code{src} is a Julia
+The honest answer for a bespoke MH kernel the R DSL cannot express: a
+changepoint sampler is the typical case. \code{src} is a Julia
 expression evaluated inside the generated module, where the transpiled
 functions, \code{DATA} and the extras are all in scope.
 }
