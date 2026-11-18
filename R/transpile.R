@@ -18,7 +18,7 @@
 #' @param helpers Character vector of user helper names callable from a body.
 #' @param vector_result `TRUE` inside a role that returns a per-state vector, in
 #'   which `rep(1, n)` / `numeric(n)` become `ones(ETR_T, n)` / `zeros(ETR_T, n)`
-#'   so the allocation follows the parameter scalar type (see DESIGN.md 3.3).
+#'   so the allocation follows the parameter scalar type.
 #' @param state_syms `TRUE` where a string naming a state should be resolved
 #'   (aggregate update bodies): against `state` it becomes a Julia Symbol,
 #'   against `X[...]` the state's integer code.
@@ -303,7 +303,7 @@ transpile_index <- function(e, ctx) {
 }
 
 # `obj$name` -> `obj.name`. The only special case is `model$x`, which is
-# recorded so the generator can derive `depends=` (DESIGN.md section 5).
+# recorded so the generator can derive `depends=`.
 transpile_dollar <- function(e, ctx) {
   obj <- e[[2]]
   field <- as.character(e[[3]])

@@ -1,6 +1,6 @@
 # Shared fixtures and the Julia gate.
 #
-# The suite is in two tiers (DESIGN.md section 7). Tier 1 needs no Julia and is
+# The suite is in two tiers. Tier 1 needs no Julia and is
 # the bulk of it; tier 2 needs a session and is skipped where there is none.
 
 tr  <- EpidemicTrajectoriesR:::et_transpile_expr

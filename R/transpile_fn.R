@@ -45,7 +45,7 @@ et_protocols <- function() names(.et_protocols)
 #' containing an `et_julia()` function is emitted **without** a `depends=`
 #' annotation. That is the safe direction (PracticalBayes then evaluates the term
 #' unconditionally, exactly as it would with no annotation at all), but it does
-#' forgo the speed-up described in DESIGN.md section 5. Pass `reads` to declare
+#' forgo the speed-up the annotation gives. Pass `reads` to declare
 #' the parameters the body touches and keep the annotation.
 #'
 #' @param src Julia source for the function BODY (not the signature, the

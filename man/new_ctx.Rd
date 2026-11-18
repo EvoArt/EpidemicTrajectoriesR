@@ -20,7 +20,7 @@ new_ctx(
 
 \item{vector_result}{\code{TRUE} inside a role that returns a per-state vector, in
 which \code{rep(1, n)} / \code{numeric(n)} become \code{ones(ETR_T, n)} / \code{zeros(ETR_T, n)}
-so the allocation follows the parameter scalar type (see DESIGN.md 3.3).}
+so the allocation follows the parameter scalar type.}
 
 \item{state_syms}{\code{TRUE} where a string naming a state should be resolved
 (aggregate update bodies): against \code{state} it becomes a Julia Symbol,
