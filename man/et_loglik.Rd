@@ -19,7 +19,9 @@ all.}
 }
 \value{
 A named numeric vector with an \code{epidemic} and (if any) \code{observation}
-entry; for a \code{likelihood = "marginal"} model, the one \code{marginal} entry.
+entry; for a \code{likelihood = "marginal"} model, the one \code{marginal} entry; for
+an \code{\link[=et_latent_data]{et_latent_data()}} model, the one \code{latent} entry, at the current latent
+values.
 }
 \description{
 A cheap structural check that needs no sampling: it loads the generated

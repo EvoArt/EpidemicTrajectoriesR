@@ -16,7 +16,16 @@
   rate_shared    = list(args = c("model", "data", "i", "t", "shared"), vector = FALSE),
   survival_shared = list(args = c("model", "data", "i", "t", "shared"), vector = FALSE),
   obs_weight_shared = list(args = c("model", "data", "X", "i", "t", "s", "shared"),
-                           vector = FALSE)
+                           vector = FALSE),
+  # A weighted chain with sampled latents (et_latent_data()): the weights over
+  # the states before the first step, and each state's observation weight at
+  # `t`, both returned as `c(...)` (a tuple) or NULL for no observation. The
+  # observation takes `shared` only when an observation_shared is declared, but
+  # is always called with it.
+  latent_start   = list(args = c("model", "data", "i"),                vector = TRUE,
+                        tuple = TRUE),
+  latent_obs     = list(args = c("model", "data", "i", "t", "shared"), vector = TRUE,
+                        tuple = TRUE, alt_args = c("model", "data", "i", "t"))
 )
 
 #' The call protocols a user function can be transpiled into.
@@ -104,7 +113,7 @@ print.et_helper <- function(x, ...) {
 # rate that reads `shared`, whatever the shared step function reads. They enter
 # the element-type prologue and the returned reads alike.
 et_transpile_role <- function(f, role, name, helpers = list(),
-                              extra_reads = character()) {
+                              extra_reads = character(), n_states = NULL) {
   spec <- .et_protocols[[role]]
   if (is.null(spec)) {
     stop("unknown role '", role, "'. One of: ",
@@ -123,10 +132,16 @@ et_transpile_role <- function(f, role, name, helpers = list(),
     stop("the ", role, " '", name, "' must be an R function or an et_julia() ",
          "object; got ", class(f)[1], ".", call. = FALSE)
   }
-  check_protocol_formals(f, spec$args, role, name)
+  if (is.null(spec$alt_args) || !identical(names(formals(f)), spec$alt_args)) {
+    check_protocol_formals(f, spec$args, role, name)
+  }
+  if (isTRUE(spec$tuple) && is.null(n_states)) {
+    stop("internal: the ", role, " role needs the number of states.", call. = FALSE)
+  }
 
   ctx <- new_ctx(helpers = helper_names, vector_result = spec$vector,
-                 typed_list = isTRUE(spec$keep_return))
+                 typed_list = isTRUE(spec$keep_return),
+                 tuple_c = if (isTRUE(spec$tuple)) n_states)
   # A scalar role must return one concrete type. An R body naturally mixes
   # `return(1)` (an Int) with `return(1 - eta)` (whatever the parameters are),
   # which makes the Julia return type a Union, runtime dispatch in the hottest
@@ -225,6 +240,74 @@ wrap_inner_returns <- function(node) {
   }
   for (k in seq_along(node)[-1]) node[[k]] <- wrap_inner_returns(node[[k]])
   node
+}
+
+# A function with no protocol beyond its number of arguments, which keep the
+# user's names: a latent's `index(t)`, an `allowed(data, i, value)` constraint.
+# Its result is returned as computed (an index must stay an Int), and it does
+# not take `model`, so a `model$x` read in it is refused rather than left to
+# fail at run time.
+transpile_plain_fn <- function(f, name, arity, helpers, what) {
+  check_julia_name(name, "function name")
+  if (inherits(f, "et_julia")) {
+    stop(what, ": an et_julia() body is not accepted here; write the function ",
+         "in R, or use a helper.", call. = FALSE)
+  }
+  if (!is.function(f) || length(formals(f)) != arity) {
+    stop(what, " must be a function of ", arity, " argument(s).", call. = FALSE)
+  }
+  args <- names(formals(f))
+  check_julia_name(args, "argument name")
+  helper_names <- vapply(helpers, function(h) h$name, character(1))
+  ctx <- new_ctx(helpers = helper_names)
+  src <- transpile_braced_body(body(f), ctx)
+  reads <- union(ctx$reads$model, helper_reads(ctx$reads$helpers, helpers))
+  if (length(reads) || isTRUE(ctx$reads$uses_type)) {
+    stop(what, " cannot read the parameters (it reads ",
+         paste0("model$", reads, collapse = ", "), "); it is evaluated without them.",
+         call. = FALSE)
+  }
+  sprintf("function %s(%s)\n%s\nend", name, paste(args, collapse = ", "), indent(src))
+}
+
+# A prior that depends on the parameters, `function(model) bernoulli_dist(model$p)`:
+# the body is one call to a distribution constructor, emitted as the matching
+# Distributions.jl constructor over transpiled arguments.
+.et_dist_ctors <- c(normal_dist = "Normal", beta_dist = "Beta", gamma_dist = "Gamma",
+                    uniform_dist = "Uniform", bernoulli_dist = "Bernoulli",
+                    discrete_uniform_dist = "DiscreteUniform",
+                    exponential_dist = "Exponential")
+
+transpile_param_prior <- function(f, name, helpers, what) {
+  if (!is.function(f) || !identical(names(formals(f)), "model")) {
+    stop(what, ": a prior that depends on the parameters must be ",
+         "function(model) <distribution>.", call. = FALSE)
+  }
+  b <- body(f)
+  if (is.call(b) && identical(as.character(b[[1]]), "{")) {
+    if (length(b) != 2L) {
+      stop(what, ": the prior's body must be a single distribution call.",
+           call. = FALSE)
+    }
+    b <- b[[2]]
+  }
+  head <- if (is.call(b) && is.symbol(b[[1]])) as.character(b[[1]]) else ""
+  if (!head %in% names(.et_dist_ctors)) {
+    stop(what, ": the prior's body must be a call to one of ",
+         paste0(names(.et_dist_ctors), "()", collapse = ", "), ".", call. = FALSE)
+  }
+  args <- as.list(b)[-1L]
+  if (!is.null(names(args)) && any(nzchar(names(args)))) {
+    stop(what, ": pass the distribution's arguments positionally.", call. = FALSE)
+  }
+  helper_names <- vapply(helpers, function(h) h$name, character(1))
+  ctx <- new_ctx(helpers = helper_names)
+  src <- vapply(args, et_transpile_expr, character(1), ctx = ctx)
+  # exponential_dist() takes a rate; Julia's Exponential takes the scale.
+  if (head == "exponential_dist") src <- sprintf("1 / (%s)", if (length(src)) src else "1")
+  list(src = sprintf("%s(model) = Distributions.%s(%s)", name, .et_dist_ctors[[head]],
+                     paste(src, collapse = ", ")),
+       dist = head)
 }
 
 helper_reads <- function(used, helpers) {

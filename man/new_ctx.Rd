@@ -11,7 +11,8 @@ new_ctx(
   states = character(),
   reads = NULL,
   state_codes = FALSE,
-  typed_list = FALSE
+  typed_list = FALSE,
+  tuple_c = NULL
 )
 }
 \arguments{
@@ -34,6 +35,10 @@ compared against the trajectory to its code.}
 rather than an \verb{@aggregate} line: \code{state} then arrives as the integer code,
 and no macro is there to turn a Symbol into one, so a name compared against
 \code{state} must be emitted as its code too.}
+
+\item{tuple_c}{The number of states, in a role whose \code{c(...)} is the
+per-state weights of a weighted chain; \code{NULL} elsewhere, where \code{c()} is
+refused.}
 }
 \description{
 Create a transpiler context.

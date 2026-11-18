@@ -33,15 +33,16 @@
 #' @param save_every Flush the archive every this many sweeps.
 #' @param keep_source Optional path to write the generated Julia to.
 #' @param quiet Suppress progress messages.
-#' @return An object of class `et_fit`.
+#' @return An object of class `et_fit`. For an [et_latent_data()] model,
+#'   `$latents` holds the latent values at the end of the run.
 #' @export
 et_sample <- function(model, blocks = list(), n_sweeps = 1000, n_burn = 0,
                       n_adapts = 0, seed = 1, x_init = NULL,
                       adtype = "forwarddiff", save_x = NULL, save_every = 100,
                       convert_x = TRUE, keep_source = NULL, quiet = FALSE) {
   et_require_session()
-  if (is_marginal(model) && (!is.null(x_init) || !is.null(save_x))) {
-    stop("et_sample(): a model with likelihood = \"marginal\" has no ",
+  if (is_collapsed(model) && (!is.null(x_init) || !is.null(save_x))) {
+    stop("et_sample(): a model whose trajectories are summed out has no ",
          "trajectory, so there is nothing to start from (`x_init`) or to save ",
          "(`save_x`).", call. = FALSE)
   }
@@ -86,6 +87,8 @@ et_sample <- function(model, blocks = list(), n_sweeps = 1000, n_burn = 0,
 
   elapsed <- raw[["_elapsed"]]
   raw[["_elapsed"]] <- NULL
+  latents <- raw[["_latents"]]
+  raw[["_latents"]] <- NULL
   draws <- restore_shapes(raw, model)
   if (!quiet) {
     message(sprintf("done in %.1f s (%.3f s/sweep)", elapsed,
@@ -98,7 +101,7 @@ et_sample <- function(model, blocks = list(), n_sweeps = 1000, n_burn = 0,
   }
   structure(list(draws = draws, model = model, blocks = gen$blocks,
                  depends = gen$depends, source = gen, module = mod,
-                 x_path = save_x,
+                 x_path = save_x, latents = latents,
                  elapsed = elapsed, n_sweeps = n_sweeps, n_burn = n_burn,
                  seed = seed), class = "et_fit")
 }
@@ -172,13 +175,15 @@ restore_shapes <- function(raw, model) {
 #'   all.
 #' @param x_init Optional starting trajectory.
 #' @return A named numeric vector with an `epidemic` and (if any) `observation`
-#'   entry; for a `likelihood = "marginal"` model, the one `marginal` entry.
+#'   entry; for a `likelihood = "marginal"` model, the one `marginal` entry; for
+#'   an [et_latent_data()] model, the one `latent` entry, at the current latent
+#'   values.
 #' @export
 et_loglik <- function(model, blocks = list(), x_init = NULL) {
   et_require_session()
-  if (is_marginal(model) && !is.null(x_init)) {
-    stop("et_loglik(): a marginal-likelihood model takes no `x_init`; the ",
-         "trajectories are summed out.", call. = FALSE)
+  if (is_collapsed(model) && !is.null(x_init)) {
+    stop("et_loglik(): this model takes no `x_init`; its trajectories are ",
+         "summed out.", call. = FALSE)
   }
   gen <- et_julia_source(model, blocks)
   mod <- et_load_module(gen)
@@ -226,6 +231,10 @@ et_simulate <- function(model, pars = NULL, seed = 1, blocks = list()) {
   if (!inherits(model, "et_model")) {
     stop("et_simulate(): `model` must come from et_model().", call. = FALSE)
   }
+  if (is_latent(model)) {
+    stop("et_simulate(): there is no simulator for an et_latent_data() model.",
+         call. = FALSE)
+  }
   gen <- et_julia_source(model, blocks)
   mod <- et_load_module(gen)
   et_simulate_inject(mod)
@@ -268,6 +277,11 @@ pars_nt_src <- function(model, pars, caller) {
 #' the forward algorithm, at a given parameter set. This is the function the
 #' fit samples against, evaluated directly.
 #'
+#' For an [et_latent_data()] model it is the same, given the current latent
+#' values: the starting values, or the last ones a fit or evaluation used.
+#' The total includes the latent priors that depend on the parameters; the
+#' per-individual terms do not.
+#'
 #' `by_individual = TRUE` returns each individual's own term. An individual
 #' whose observations no hidden path can explain gets `-Inf`, which is the
 #' place to look when the total is `-Inf`.
@@ -280,14 +294,16 @@ pars_nt_src <- function(model, pars, caller) {
 #' @export
 et_marginal_loglik <- function(model, pars = NULL, by_individual = FALSE) {
   et_require_session()
-  if (!is_marginal(model)) {
+  if (!is_collapsed(model)) {
     stop("et_marginal_loglik(): the model was built with likelihood = ",
          "\"augmented\". Rebuild it with et_model(..., likelihood = ",
          "\"marginal\").", call. = FALSE)
   }
   gen <- et_julia_source(model)
   mod <- et_load_module(gen)
-  JuliaCall::julia_eval(sprintf("%s.et_check_independent!()", mod))
+  if (is_marginal(model)) {
+    JuliaCall::julia_eval(sprintf("%s.et_check_independent!()", mod))
+  }
   fn <- if (isTRUE(by_individual)) "et_hmm_logliks_at" else "et_marginal_at"
   JuliaCall::julia_eval(sprintf("%s.%s(%s)", mod, fn,
                                 pars_nt_src(model, pars, "et_marginal_loglik()")))

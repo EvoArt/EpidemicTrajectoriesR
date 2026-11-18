@@ -24,6 +24,11 @@ the forward algorithm, at a given parameter set. This is the function the
 fit samples against, evaluated directly.
 }
 \details{
+For an \code{\link[=et_latent_data]{et_latent_data()}} model it is the same, given the current latent
+values: the starting values, or the last ones a fit or evaluation used.
+The total includes the latent priors that depend on the parameters; the
+per-individual terms do not.
+
 \code{by_individual = TRUE} returns each individual's own term. An individual
 whose observations no hidden path can explain gets \code{-Inf}, which is the
 place to look when the total is \code{-Inf}.

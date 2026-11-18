@@ -78,13 +78,25 @@ print.prior <- function(x, ...) {
 #'
 #'   Cheaper and exactly mixing where it applies, because there is no
 #'   trajectory to mix over.
+#'
+#'   For an [et_latent_data()] model this is ignored: its chains are always
+#'   summed out, and its latent variables are the latent block.
 #' @return An object of class `et_model`.
 #' @export
 et_model <- function(data, parameters, derived = list(), entry_time = NULL,
                      likelihood = c("augmented", "marginal")) {
   likelihood <- match.arg(likelihood)
-  if (!inherits(data, "et_data")) {
-    stop("et_model(): `data` must come from et_data().", call. = FALSE)
+  latent <- inherits(data, "et_latent_data")
+  if (!inherits(data, "et_data") && !latent) {
+    stop("et_model(): `data` must come from et_data() or et_latent_data().",
+         call. = FALSE)
+  }
+  if (latent) {
+    likelihood <- "latent"
+    if (!is.null(entry_time)) {
+      stop("et_model(): `entry_time` does not apply to et_latent_data(); write ",
+           "entry into the weights.", call. = FALSE)
+    }
   }
   if (!is.list(parameters) || !length(parameters) || is.null(names(parameters))) {
     stop("et_model(): `parameters` must be a non-empty NAMED list of prior().",
@@ -100,6 +112,20 @@ et_model <- function(data, parameters, derived = list(), entry_time = NULL,
   if ("X" %in% names(parameters)) {
     stop("et_model(): 'X' is reserved for the latent trajectory block.",
          call. = FALSE)
+  }
+  if (latent) {
+    clash <- intersect(names(parameters), c("latents", names(data$latents)))
+    if (length(clash)) {
+      stop("et_model(): parameter name(s) clash with the latent block: ",
+           paste(clash, collapse = ", "), ".", call. = FALSE)
+    }
+    owned <- names(parameters)[vapply(parameters, function(p) p$kind == "latent",
+                                      logical(1))]
+    if (length(owned)) {
+      stop("et_model(): an et_latent_data() model has no conjugate kernels, so ",
+           "kind = \"latent\" parameter(s) ", paste(owned, collapse = ", "),
+           " would never be informed. Give them a prior.", call. = FALSE)
+    }
   }
   if (!is.list(derived)) stop("et_model(): `derived` must be a list.", call. = FALSE)
   if (length(derived)) {
@@ -162,13 +188,18 @@ is_marginal <- function(model) identical(model$likelihood, "marginal")
 # For the entry points that read a sampled trajectory, which a collapsed fit
 # does not have.
 require_augmented <- function(model, caller) {
-  if (is_marginal(model)) {
-    stop(caller, " needs a sampled trajectory, and a model with likelihood = ",
-         "\"marginal\" has none: its trajectories are summed out.",
-         call. = FALSE)
+  if (is_marginal(model) || is_latent(model)) {
+    stop(caller, " needs a sampled trajectory, and ",
+         if (is_latent(model)) "an et_latent_data() model"
+         else "a model with likelihood = \"marginal\"",
+         " has none: its trajectories are summed out.", call. = FALSE)
   }
   invisible(TRUE)
 }
+
+# Both classes whose trajectories are summed out: no `X`, no iFFBS block, no
+# conjugate kernel.
+is_collapsed <- function(model) is_marginal(model) || is_latent(model)
 
 # What a collapsed model cannot carry, refused at declaration rather than
 # discovered inside Julia. ET's own `require_independent` makes the coupling
@@ -214,7 +245,7 @@ check_marginal <- function(data, parameters, entry_time) {
 #' @export
 print.et_model <- function(x, ...) {
   cat("<et_model>", if (is_marginal(x)) " marginal likelihood (trajectories summed out)",
-      "\n", sep = "")
+      if (is_latent(x)) " weighted chains summed out, latents sampled", "\n", sep = "")
   print(x$data)
   cat("  parameters:\n")
   for (nm in x$par_names) {

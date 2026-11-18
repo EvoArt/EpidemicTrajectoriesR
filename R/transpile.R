@@ -25,6 +25,9 @@
 #' @param states The state space, in encoding order. Needed to resolve a name
 #'   compared against the trajectory to its code.
 #' @param reads An environment accumulating the `model$x` names read.
+#' @param tuple_c The number of states, in a role whose `c(...)` is the
+#'   per-state weights of a weighted chain; `NULL` elsewhere, where `c()` is
+#'   refused.
 #' @param state_codes `TRUE` where the body becomes a plain Julia function
 #'   rather than an `@aggregate` line: `state` then arrives as the integer code,
 #'   and no macro is there to turn a Symbol into one, so a name compared against
@@ -32,7 +35,7 @@
 #' @keywords internal
 new_ctx <- function(helpers = character(), vector_result = FALSE,
                     state_syms = FALSE, states = character(), reads = NULL,
-                    state_codes = FALSE, typed_list = FALSE) {
+                    state_codes = FALSE, typed_list = FALSE, tuple_c = NULL) {
   if (is.null(reads)) {
     reads <- new.env(parent = emptyenv())
     reads$model <- character()
@@ -41,7 +44,7 @@ new_ctx <- function(helpers = character(), vector_result = FALSE,
   }
   list(helpers = helpers, vector_result = vector_result,
        state_syms = state_syms, states = states, reads = reads,
-       state_codes = state_codes, typed_list = typed_list)
+       state_codes = state_codes, typed_list = typed_list, tuple_c = tuple_c)
 }
 
 # Maths / builtin calls allowed in a body, mapped R-name -> Julia-name.
@@ -57,14 +60,19 @@ new_ctx <- function(helpers = character(), vector_result = FALSE,
 )
 
 # Binary operators mapped R -> Julia. R's `&&`/`||` and `&`/`|` mean the same
-# things in Julia; `%%` and `%/%` do not have identical negative-operand
-# semantics and so are not included.
+# things in Julia.
 .et_binop_map <- c(
   "+" = "+", "-" = "-", "*" = "*", "/" = "/", "^" = "^",
   "==" = "==", "!=" = "!=", "<" = "<", ">" = ">",
   "<=" = "<=", ">=" = ">=",
   "&&" = "&&", "||" = "||", "&" = "&", "|" = "|"
 )
+
+# R's `%/%` and `%%` round toward minus infinity, and so do Julia's `fld` and
+# `mod`, for negative operands too. Julia's `÷` and `%` truncate toward zero
+# instead, so they are never emitted. Integer division by zero errors in Julia
+# where R gives NA or Inf: the loud direction.
+.et_binfn_map <- c("%/%" = "fld", "%%" = "mod")
 
 #' Transpile one R expression (language object) to Julia source.
 #'
@@ -122,6 +130,10 @@ et_transpile_expr <- function(e, ctx = new_ctx()) {
 
   if (op %in% names(.et_binop_map) && length(e) == 3L) {
     return(transpile_binop(e, ctx, op))
+  }
+  if (op %in% names(.et_binfn_map) && length(e) == 3L) {
+    return(sprintf("%s(%s, %s)", .et_binfn_map[[op]], et_transpile_expr(e[[2]], ctx),
+                   et_transpile_expr(e[[3]], ctx)))
   }
 
   if (op == "ifelse" && length(e) == 4L) {
@@ -323,12 +335,18 @@ transpile_list <- function(e, ctx) {
   if (isTRUE(ctx$typed_list)) {
     ctx$reads$uses_type <- TRUE
     vals <- sprintf("convert(%s, %s)", ET_TYPE_VAR, vals)
+    # Field order is part of a NamedTuple's type, so two return sites listing
+    # the same names in different orders would give a Union. Elements are only
+    # read by name, so sorting them costs nothing.
+    o <- order(nms, method = "radix")
+    nms <- nms[o]; vals <- vals[o]
   }
   paste0("(; ", paste(sprintf("%s = %s", nms, vals), collapse = ", "), ")")
 }
 
 transpile_call <- function(e, ctx, op) {
   args <- as.list(e)[-1L]
+  if (op == "et_capture_loglik") return(transpile_capture_loglik(args, ctx))
   if (!is.null(names(args)) && any(nzchar(names(args)))) {
     stop("transpile: named arguments are not supported in a transpiled call ",
          "(`", op, "`); pass them positionally.", call. = FALSE)
@@ -345,6 +363,31 @@ transpile_call <- function(e, ctx, op) {
   if (op %in% names(.et_builtin_map)) {
     return(paste0(.et_builtin_map[[op]], "(", paste(arg_src, collapse = ", "), ")"))
   }
+  # One-argument forms only: with `location`/`scale` the R functions are a
+  # different map from StatsFuns' standard logistic.
+  if (op %in% c("plogis", "qlogis")) {
+    if (length(arg_src) != 1L) {
+      stop("transpile: ", op, "() is supported with one argument only (the ",
+           "standard logistic).", call. = FALSE)
+    }
+    return(sprintf("StatsFuns.%s(%s)", if (op == "plogis") "logistic" else "logit",
+                   arg_src))
+  }
+  # `dnorm(x, mean, sd)`, positionally; `log = TRUE` is a named argument and so
+  # already refused above.
+  if (op == "dnorm") {
+    if (!length(arg_src) || length(arg_src) > 3L) {
+      stop("transpile: dnorm() takes x, and optionally mean and sd, positionally.",
+           call. = FALSE)
+    }
+    a <- c(arg_src, "0", "1")[1:3]
+    if (length(arg_src) == 2L) a[3] <- "1"
+    return(sprintf("Distributions.pdf(Distributions.Normal(%s, %s), %s)",
+                   a[2], a[3], a[1]))
+  }
+  # `c(...)` as the per-state weights of a weighted chain: a tuple, every entry
+  # in the parameter type so each return site has the same concrete type.
+  if (op == "c" && !is.null(ctx$tuple_c)) return(transpile_tuple_c(arg_src, ctx))
   if (op == "nrow" && length(arg_src) == 1L) return(paste0("size(", arg_src, ", 1)"))
   if (op == "ncol" && length(arg_src) == 1L) return(paste0("size(", arg_src, ", 2)"))
   if (op == "seq_len" && length(arg_src) == 1L) return(paste0("1:", arg_src))
@@ -379,10 +422,52 @@ transpile_call <- function(e, ctx, op) {
   }
   stop("transpile: call to unsupported function '", op, "'.\n",
        "  Allowed: ", paste(sort(names(.et_builtin_map)), collapse = ", "),
-       ", nrow, ncol, seq_len, seq_along, rep, numeric, ifelse,\n",
+       ", nrow, ncol, seq_len, seq_along, rep, numeric, ifelse, plogis, qlogis,\n",
+       "  dnorm, et_capture_loglik,",
        "  plus operators and any function declared with et_helper().\n",
        "  If '", op, "' is your own function, declare it as a helper; if it has ",
        "no Julia equivalent, use et_julia().", call. = FALSE)
+}
+
+transpile_tuple_c <- function(arg_src, ctx) {
+  if (length(arg_src) != ctx$tuple_c) {
+    stop("transpile: c() here gives one weight per state, so it needs ",
+         ctx$tuple_c, " values; got ", length(arg_src), ".", call. = FALSE)
+  }
+  ctx$reads$uses_type <- TRUE
+  paste0("(", paste(sprintf("convert(%s, %s)", ET_TYPE_VAR, arg_src),
+                    collapse = ", "), ")")
+}
+
+# et_capture_loglik(captures, i, occasion, x, y, sigma, rate, detectors, form)
+# -> ET's capture_loglik(captures, i, occasion, (x, y), sigma, rate; ...).
+# The one call allowed named arguments, since `detectors` and `form` are
+# keywords on the Julia side and nothing is reordered.
+transpile_capture_loglik <- function(args, ctx) {
+  nms <- names(args) %||% rep("", length(args))
+  pos <- args[!nzchar(nms)]
+  named <- args[nzchar(nms)]
+  bad <- setdiff(names(named), c("detectors", "form"))
+  if (length(bad) || length(pos) != 7L) {
+    stop("transpile: et_capture_loglik() takes captures, i, occasion, x, y, ",
+         "sigma, rate positionally, then optionally `detectors =` and `form =`.",
+         call. = FALSE)
+  }
+  src <- vapply(pos, et_transpile_expr, character(1), ctx = ctx)
+  kw <- character()
+  if (!is.null(named$detectors)) {
+    kw <- c(kw, paste0("detectors = ", et_transpile_expr(named$detectors, ctx)))
+  }
+  if (!is.null(named$form)) {
+    if (!is.character(named$form) || !named$form %in% c("hazard", "poisson")) {
+      stop("transpile: et_capture_loglik(form =) is \"hazard\" or \"poisson\".",
+           call. = FALSE)
+    }
+    kw <- c(kw, paste0("form = :", named$form))
+  }
+  sprintf("capture_loglik(%s, %s, %s, (%s, %s), %s, %s%s)", src[1], src[2], src[3],
+          src[4], src[5], src[6], src[7],
+          if (length(kw)) paste0("; ", paste(kw, collapse = ", ")) else "")
 }
 
 # `rep(x, n)` / `numeric(n)` -> a typed Julia allocation.

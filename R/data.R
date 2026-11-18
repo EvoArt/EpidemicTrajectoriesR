@@ -63,6 +63,10 @@ et_data <- function(n_individuals, n_timepoints, transitions, starting_state,
   if (!inherits(transitions, "et_transitions")) {
     stop("et_data(): `transitions` must come from et_transitions().", call. = FALSE)
   }
+  if (isTRUE(transitions$weights)) {
+    stop("et_data(): transitions declared with weights = TRUE belong to ",
+         "et_latent_data(); epidemic_data takes probabilities.", call. = FALSE)
+  }
   if (!inherits(aggregates, "et_aggregate")) {
     stop("et_data(): `aggregates` must come from et_aggregate() or et_aggregates().",
          call. = FALSE)

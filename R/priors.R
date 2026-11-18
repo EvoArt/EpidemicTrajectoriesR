@@ -12,7 +12,8 @@ new_dist <- function(name, args, vector_arg = FALSE) {
 #'
 #' @param mean,sd Normal parameters.
 #' @param shape,scale Gamma parameters (Julia's `Gamma(shape, scale)`).
-#' @param a,b Beta / Uniform parameters.
+#' @param a,b Beta / Uniform parameters, or the inclusive whole-number bounds
+#'   of a discrete uniform.
 #' @param rate Exponential rate; emitted as `Exponential(1 / rate)` because
 #'   Julia's `Exponential` is parameterised by scale, which is the single most
 #'   likely thing for an R user to get backwards.
@@ -56,6 +57,28 @@ uniform_dist <- function(a = 0, b = 1) new_dist("Uniform", list(a, b))
 dirichlet_dist <- function(alpha) new_dist("Dirichlet", list(as.numeric(alpha)),
                                          vector_arg = TRUE)
 
+#' @param p Bernoulli success probability.
+#' @rdname prior_distributions
+#' @export
+bernoulli_dist <- function(p = 0.5) new_dist("Bernoulli", list(p))
+
+#' @rdname prior_distributions
+#' @export
+discrete_uniform_dist <- function(a, b) {
+  if (!is.numeric(a) || !is.numeric(b) || a != round(a) || b != round(b)) {
+    stop("discrete_uniform_dist(): the bounds must be whole numbers.", call. = FALSE)
+  }
+  d <- new_dist("DiscreteUniform", list(a, b))
+  d$int_args <- TRUE
+  d
+}
+
+# Families whose values are integers. A latent with one of these priors is held
+# as a Vector{Int}, so its sampler takes integer steps.
+.discrete_families <- c("Bernoulli", "DiscreteUniform", "Poisson", "Binomial",
+                        "Categorical", "Geometric", "NegativeBinomial")
+is_discrete_dist <- function(d) inherits(d, "custom_dist") && d$name %in% .discrete_families
+
 #' @rdname prior_distributions
 #' @export
 truncated_dist <- function(d, lower = NA, upper = NA) {
@@ -88,6 +111,9 @@ dist_to_julia <- function(d) {
   }
   if (isTRUE(d$vector_arg)) {
     return(sprintf("%s(%s)", d$name, julia_vector(d$args[[1]], "Float64")))
+  }
+  if (isTRUE(d$int_args)) {
+    return(sprintf("%s(%s)", d$name, paste(julia_int(unlist(d$args)), collapse = ", ")))
   }
   args <- vapply(d$args, function(a) {
     if (inherits(a, "custom_dist")) return(dist_to_julia(a))

@@ -112,6 +112,29 @@ contribution with no error. This package derives the lists from your function
 bodies rather than asking you for them, and `et_check_depends()` perturbs each
 parameter to confirm no term it was excluded from actually moves.
 
+## Sampled latent variables
+
+Some models have no coupling between individuals, but their transitions read
+quantities that are not hidden states: an activity centre each year, an unknown
+birth year, the position of an unmapped trap. `et_latent_data()` declares such
+a model. Each individual's chain is summed out exactly, its transitions are
+weights rather than probabilities (`et_transitions(..., weights = TRUE)`, so a
+move can carry a density), and the latents are resampled once per Gibbs sweep.
+
+```r
+latents <- et_latents(
+  S   = et_field(2, n_years, prior = normal_dist(0, 10),
+                 index = function(t) (t + 7) %/% 8),          # a centre per year
+  sex = et_per_individual(function(model) bernoulli_dist(model$sex_prop),
+                          observed = sex))                     # NA where unknown
+```
+
+Spatial capture-recapture data go in through `et_spatial_captures()` and are
+scored inside the observation function with `et_capture_loglik()`.
+
+For now this needs the `latent-hmm` branches of EpidemicTrajectories and
+PracticalEpiBayes, passed to `et_setup(dev = ...)`.
+
 ## Autodiff backends
 
 ```r
@@ -127,8 +150,9 @@ changes the time taken, never the answer.
 ## Writing the functions
 
 Rate and observation functions are ordinary R, restricted to what has an exact
-Julia equivalent: arithmetic and comparison, `if`/`else`, `for` over a range,
-indexing, `$`, `ifelse`, and the usual maths functions. Anything outside that
+Julia equivalent: arithmetic and comparison, `%/%` and `%%`, `if`/`else`, `for`
+over a range, indexing, `$`, `ifelse`, the usual maths functions, `plogis`,
+`qlogis` and `dnorm`. Anything outside that
 raises an error naming the construct, rather than emitting something plausible
 that means a different thing in Julia.
 

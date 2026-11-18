@@ -4,7 +4,14 @@
 \alias{et_transitions}
 \title{Declare a model's states, transitions and rates.}
 \usage{
-et_transitions(states, ..., survival = NULL, auto_self = TRUE, shared = NULL)
+et_transitions(
+  states,
+  ...,
+  survival = NULL,
+  auto_self = TRUE,
+  shared = NULL,
+  weights = FALSE
+)
 }
 \arguments{
 \item{states}{Character vector of state names. The order fixes the encoding:
@@ -12,19 +19,28 @@ state \code{k} in the trajectory means \code{states[k]}.}
 
 \item{...}{Transitions, either as named arguments whose name is an arrow
 string (\code{"S -> I" = infection}) or as \code{\link[=et_trans]{et_trans()}} objects. The arrow form
-mirrors the Julia line character for character.}
+mirrors the Julia line character for character; \code{"(A, B) -> D" = f}
+declares \code{A -> D} and \code{B -> D} with the same rate. A rate is a function, a
+one-sided formula over the rate's arguments (\code{~ shared$die}), or a
+constant.}
 
 \item{survival}{Optional \code{\link[=et_survival]{et_survival()}}.}
 
-\item{auto_self}{Fill each state's self-transition with the leftover
-probability mass (ET's \verb{:auto_self}, on by default).}
+\item{auto_self}{Kept for old scripts. Each state's self-transition is always
+the probability its declared transitions leave; \code{FALSE} is refused.}
 
 \item{shared}{Optional function \verb{(model, data, i, t)} returning a \code{list()} of
 named quantities that several rates need, computed once per individual and
 timepoint instead of once per rate. Every rate (and the survival function)
 then takes a fifth argument, \code{shared}, and reads them as \code{shared$name}.
 Worth it whenever rates repeat work: a death probability scaling every
-live move, a hazard built from covariates.}
+live move, a hazard built from covariates. With \code{weights = TRUE} it may
+return \code{NULL} at a timepoint where nothing moves.}
+
+\item{weights}{\code{TRUE} for ET's \verb{:weights} form, used by \code{\link[=et_latent_data]{et_latent_data()}}:
+the values are non-negative weights (a probability times a density, say)
+rather than probabilities, nothing is filled in, and every edge, the
+self-transitions included, must be declared.}
 }
 \value{
 An object of class \code{et_transitions}.

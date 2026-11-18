@@ -219,16 +219,24 @@ et_survival <- function(fn, death) {
 #'   state `k` in the trajectory means `states[k]`.
 #' @param ... Transitions, either as named arguments whose name is an arrow
 #'   string (`"S -> I" = infection`) or as [et_trans()] objects. The arrow form
-#'   mirrors the Julia line character for character.
+#'   mirrors the Julia line character for character; `"(A, B) -> D" = f`
+#'   declares `A -> D` and `B -> D` with the same rate. A rate is a function, a
+#'   one-sided formula over the rate's arguments (`~ shared$die`), or a
+#'   constant.
 #' @param survival Optional [et_survival()].
-#' @param auto_self Fill each state's self-transition with the leftover
-#'   probability mass (ET's `:auto_self`, on by default).
+#' @param auto_self Kept for old scripts. Each state's self-transition is always
+#'   the probability its declared transitions leave; `FALSE` is refused.
 #' @param shared Optional function `(model, data, i, t)` returning a `list()` of
 #'   named quantities that several rates need, computed once per individual and
 #'   timepoint instead of once per rate. Every rate (and the survival function)
 #'   then takes a fifth argument, `shared`, and reads them as `shared$name`.
 #'   Worth it whenever rates repeat work: a death probability scaling every
-#'   live move, a hazard built from covariates.
+#'   live move, a hazard built from covariates. With `weights = TRUE` it may
+#'   return `NULL` at a timepoint where nothing moves.
+#' @param weights `TRUE` for ET's `:weights` form, used by [et_latent_data()]:
+#'   the values are non-negative weights (a probability times a density, say)
+#'   rather than probabilities, nothing is filled in, and every edge, the
+#'   self-transitions included, must be declared.
 #' @return An object of class `et_transitions`.
 #' @export
 #' @examples
@@ -242,12 +250,24 @@ et_survival <- function(fn, death) {
 #'   "S -> I" = function(model, data, i, t, shared) (1 - shared$die) * model$beta,
 #'   "S -> D" = function(model, data, i, t, shared) shared$die)
 et_transitions <- function(states, ..., survival = NULL, auto_self = TRUE,
-                           shared = NULL) {
+                           shared = NULL, weights = FALSE) {
   states <- check_states(states)
   if (!is.null(shared) && !is.function(shared) && !inherits(shared, "et_julia")) {
     stop("et_transitions(): `shared` must be a function(model, data, i, t) ",
          "returning a list(), or an et_julia().", call. = FALSE)
   }
+  weights <- isTRUE(weights)
+  if (!isTRUE(auto_self) && !weights) {
+    stop("et_transitions(): auto_self = FALSE is no longer supported: ET always ",
+         "gives a state's self-transition the probability its declared ",
+         "transitions leave. For a chain where every edge is declared, use ",
+         "weights = TRUE.", call. = FALSE)
+  }
+  if (weights && !is.null(survival)) {
+    stop("et_transitions(): `survival` does not go with weights = TRUE; ",
+         "declare the death edges as weights.", call. = FALSE)
+  }
+  rate_args <- c("model", "data", "i", "t", if (!is.null(shared)) "shared")
   args <- list(...)
   nms <- names(args) %||% rep("", length(args))
   trans <- list()
@@ -262,12 +282,17 @@ et_transitions <- function(states, ..., survival = NULL, auto_self = TRUE,
            'nor a named arrow argument such as `"S -> I" = infection`.',
            call. = FALSE)
     }
-    m <- regmatches(nms[k], regexec("^\\s*([A-Za-z_][A-Za-z0-9_]*)\\s*->\\s*([A-Za-z_][A-Za-z0-9_]*)\\s*$", nms[k]))[[1]]
+    id <- "[A-Za-z_][A-Za-z0-9_]*"
+    m <- regmatches(nms[k], regexec(sprintf(
+      "^\\s*(%s|\\(\\s*%s(\\s*,\\s*%s)*\\s*\\))\\s*->\\s*(%s)\\s*$", id, id, id, id),
+      nms[k]))[[1]]
     if (!length(m)) {
       stop("et_transitions(): '", nms[k], '\' is not a transition. Use the form ',
-           '"From -> To" = rate.', call. = FALSE)
+           '"From -> To" = rate, or "(A, B) -> To" = rate.', call. = FALSE)
     }
-    trans[[length(trans) + 1L]] <- et_trans(m[2], m[3], a)
+    from <- trimws(strsplit(gsub("[()]", "", m[2]), ",")[[1]])
+    rate <- as_rate_fn(a, rate_args, nms[k])
+    for (f in from) trans[[length(trans) + 1L]] <- et_trans(f, m[4], rate)
   }
   if (!length(trans)) {
     stop("et_transitions(): declare at least one transition.", call. = FALSE)
@@ -297,13 +322,37 @@ et_transitions <- function(states, ..., survival = NULL, auto_self = TRUE,
          paste(unique(key[duplicated(key)]), collapse = ", "), ".", call. = FALSE)
   }
   structure(list(states = states, transitions = trans, survival = survival,
-                 auto_self = isTRUE(auto_self), shared = shared),
+                 auto_self = !weights, shared = shared, weights = weights),
             class = "et_transitions")
+}
+
+# A rate given as `~ expr` or a constant becomes the function it abbreviates,
+# with the rate signature, so everything downstream sees one kind of rate.
+as_rate_fn <- function(a, rate_args, what) {
+  if (is.function(a) || inherits(a, "et_julia")) return(a)
+  body <- if (inherits(a, "formula")) {
+    if (length(a) != 2L) {
+      stop("et_transitions(): the rate for '", what, "' must be a one-sided ",
+           "formula, `~ expr`.", call. = FALSE)
+    }
+    a[[2]]
+  } else if (is.numeric(a) && length(a) == 1L && !is.na(a)) {
+    a
+  } else {
+    stop("et_transitions(): the rate for '", what, "' must be a function, a ",
+         "one-sided formula or a number.", call. = FALSE)
+  }
+  f <- function() NULL
+  formals(f) <- stats::setNames(rep(list(quote(expr = )), length(rate_args)), rate_args)
+  body(f) <- body
+  environment(f) <- baseenv()
+  f
 }
 
 #' @export
 print.et_transitions <- function(x, ...) {
-  cat("<et_transitions> states: ", paste(x$states, collapse = ", "), "\n", sep = "")
+  cat("<et_transitions> states: ", paste(x$states, collapse = ", "),
+      if (isTRUE(x$weights)) "  (weights)", "\n", sep = "")
   if (!is.null(x$survival)) {
     cat("  @survival  death = ", x$survival$death, "\n", sep = "")
   }

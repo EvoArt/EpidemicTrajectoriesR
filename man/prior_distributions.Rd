@@ -8,6 +8,8 @@
 \alias{exponential_dist}
 \alias{uniform_dist}
 \alias{dirichlet_dist}
+\alias{bernoulli_dist}
+\alias{discrete_uniform_dist}
 \alias{truncated_dist}
 \alias{custom_dist}
 \alias{et_normal}
@@ -31,6 +33,10 @@ exponential_dist(rate = 1)
 uniform_dist(a = 0, b = 1)
 
 dirichlet_dist(alpha)
+
+bernoulli_dist(p = 0.5)
+
+discrete_uniform_dist(a, b)
 
 truncated_dist(d, lower = NA, upper = NA)
 
@@ -57,13 +63,16 @@ et_dist(...)
 
 \item{shape, scale}{Gamma parameters (Julia's \code{Gamma(shape, scale)}).}
 
-\item{a, b}{Beta / Uniform parameters.}
+\item{a, b}{Beta / Uniform parameters, or the inclusive whole-number bounds
+of a discrete uniform.}
 
 \item{rate}{Exponential rate; emitted as \code{Exponential(1 / rate)} because
 Julia's \code{Exponential} is parameterised by scale, which is the single most
 likely thing for an R user to get backwards.}
 
 \item{alpha}{Dirichlet concentration vector.}
+
+\item{p}{Bernoulli success probability.}
 
 \item{d}{A distribution to truncate.}
 

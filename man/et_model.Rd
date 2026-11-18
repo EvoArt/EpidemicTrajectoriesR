@@ -44,7 +44,10 @@ numerically when the module is first used.
 }
 
 Cheaper and exactly mixing where it applies, because there is no
-trajectory to mix over.}
+trajectory to mix over.
+
+For an \code{\link[=et_latent_data]{et_latent_data()}} model this is ignored: its chains are always
+summed out, and its latent variables are the latent block.}
 }
 \value{
 An object of class \code{et_model}.

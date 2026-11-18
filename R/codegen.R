@@ -66,6 +66,7 @@ rename_module <- function(gen, module_name) {
 # ---- the generator ----------------------------------------------------------
 
 generate_module <- function(model, blocks, module_name) {
+  if (is_latent(model)) return(generate_latent_module(model, blocks, module_name))
   d <- model$data
   states <- d$transitions$states
   prefix <- paste0(module_name, "_")
@@ -373,6 +374,7 @@ julia_usings <- function() paste(
   "using PracticalBayes",
   "using PracticalEpiBayes",
   "using Distributions",
+  "import StatsFuns",
   "using Random: AbstractRNG",
   # PracticalBayes re-exports HMC/NUTS but not the integrator or the metric, and
   # a hand-tuned diagonal metric can be a model's whole HMC configuration.
@@ -391,13 +393,19 @@ julia_usings <- function() paste(
 # something to depend on: an R integer may arrive as Int32, a 1-column matrix as
 # a vector. Converting here makes the module's types a property of the generated
 # source rather than of the marshalling.
-julia_typed_binding <- function(name, expr, value) {
-  el <- if (is.integer(value)) "Int" else if (is.logical(value)) "Bool" else "Float64"
+#
+# `el` overrides the element type; `vector = TRUE` keeps a length-1 value a
+# vector, for an argument that is a list of things however many there are.
+julia_typed_binding <- function(name, expr, value, el = NULL, vector = FALSE) {
+  el <- el %||% (if (is.integer(value)) "Int" else if (is.logical(value)) "Bool"
+                 else "Float64")
   d <- dim(value)
   if (is.null(d)) {
-    if (length(value) == 1L) {
+    if (length(value) == 1L && !vector) {
       return(sprintf("const %s = %s(%s)", name, el, expr))
     }
+    # `vcat`, not `vec`: a length-1 vector can arrive as a bare scalar.
+    if (vector) return(sprintf("const %s = Vector{%s}(vcat(%s))", name, el, expr))
     return(sprintf("const %s = Vector{%s}(vec(%s))", name, el, expr))
   }
   if (length(d) == 2L) {
@@ -449,7 +457,7 @@ transitions_src <- function(const_name, spec, rate_names, surv_name,
                               rate_names[[paste0(tr$from, "->", tr$to)]]))
   }
   sprintf("const %s = @transitions STATES%s begin\n%s\nend", const_name,
-          if (spec$auto_self) "" else " :no_auto_self",
+          if (isTRUE(spec$weights)) " :weights" else "",
           indent(paste(lines, collapse = "\n")))
 }
 

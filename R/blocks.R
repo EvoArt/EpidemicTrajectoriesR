@@ -230,14 +230,14 @@ resolve_blocks <- function(model, blocks) {
     }
   }
   is_traj <- vapply(blocks, function(b) b$kind == "iffbs", logical(1))
-  if (is_marginal(model)) {
+  if (is_collapsed(model)) {
     # Nothing to resample and nothing to condition on: the trajectory is summed
     # out inside the likelihood. A kernel that reads a sampled X would be
     # conditioning on a variable the model no longer has.
     bad <- vapply(blocks, function(b)
       !(b$kind %in% c("nuts", "hmc", "adaptive_hmc", "julia")), logical(1))
     if (any(bad)) {
-      stop("a model with likelihood = \"marginal\" has no latent trajectory, ",
+      stop("a model whose trajectories are summed out has no latent trajectory, ",
            "so it takes no iFFBS block and no conjugate kernel (",
            paste(unique(vapply(blocks[bad], function(b) b$kind, character(1))),
                  collapse = ", "),
@@ -284,6 +284,6 @@ resolve_blocks <- function(model, blocks) {
   if (length(leftover)) {
     rest <- c(rest, list(et_nuts(leftover)))
   }
-  if (is_marginal(model)) return(rest)
+  if (is_collapsed(model)) return(rest)
   c(rest, list(traj))
 }
