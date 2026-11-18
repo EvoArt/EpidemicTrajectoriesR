@@ -132,9 +132,6 @@ latents <- et_latents(
 Spatial capture-recapture data go in through `et_spatial_captures()` and are
 scored inside the observation function with `et_capture_loglik()`.
 
-For now this needs the `latent-hmm` branches of EpidemicTrajectories and
-PracticalEpiBayes, passed to `et_setup(dev = ...)`.
-
 ## Autodiff backends
 
 ```r

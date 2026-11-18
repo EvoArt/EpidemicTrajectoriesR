@@ -1,6 +1,6 @@
 # This file is machine-generated - editing it directly is not advised
 
-julia_version = "1.10.9"
+julia_version = "1.10.10"
 manifest_format = "2.0"
 project_hash = "03e1b8218b8db4af261491bf91f7edf3072a9fa8"
 
@@ -519,17 +519,19 @@ weakdeps = ["Adapt", "ChainRulesCore"]
 
 [[deps.EpidemicTrajectories]]
 deps = ["Distributions", "LinearAlgebra", "Random", "Serialization", "StatsFuns"]
-git-tree-sha1 = "3d600b2805581823b5f61f3c62ceaa96963a76f0"
+git-tree-sha1 = "dc8882058856fd28bb694c33af18722e0e37cc4b"
 repo-rev = "master"
 repo-url = "https://github.com/EvoArt/EpidemicTrajectories.git"
 uuid = "7100e41f-98d3-4508-a32b-553d87bf8b28"
 version = "0.1.0"
 
     [deps.EpidemicTrajectories.extensions]
+    EpidemicTrajectoriesForwardDiffExt = "ForwardDiff"
     EpidemicTrajectoriesHypothesisTestsExt = "HypothesisTests"
     EpidemicTrajectoriesMakieExt = "Makie"
 
     [deps.EpidemicTrajectories.weakdeps]
+    ForwardDiff = "f6369f11-7733-5829-9624-2563aa707210"
     HypothesisTests = "09f84164-cd44-5f33-b23f-e6b0d136a0d5"
     Makie = "ee78f7c6-11fb-53f2-987a-cfe4a2b5a57a"
 
@@ -906,7 +908,7 @@ version = "0.3.23+4"
 [[deps.OpenLibm_jll]]
 deps = ["Artifacts", "Libdl"]
 uuid = "05823500-19ac-5b8b-9628-191a04bc5112"
-version = "0.8.1+4"
+version = "0.8.5+0"
 
 [[deps.OpenSpecFun_jll]]
 deps = ["Artifacts", "CompilerSupportLibraries_jll", "JLLWrappers", "Libdl"]
@@ -960,7 +962,7 @@ version = "0.2.2"
 
 [[deps.PracticalBayes]]
 deps = ["ADTypes", "AbstractMCMC", "AbstractPPL", "Accessors", "AdvancedHMC", "Bijectors", "ConsoleProgressMonitor", "DifferentiationInterface", "Distributions", "FlexiChains", "ForwardDiff", "LinearAlgebra", "LogDensityProblems", "Logging", "LoggingExtras", "MacroTools", "ProgressLogging", "Random", "TerminalLoggers", "UUIDs"]
-git-tree-sha1 = "f424e9a51f8f0fc7b0c1747110bc37c803c68115"
+git-tree-sha1 = "0dfed6f6a477d0e302fca1cdfbdd373f44492a1c"
 repo-rev = "master"
 repo-url = "https://github.com/EvoArt/PracticalBayes.git"
 uuid = "8f6a2c3e-9b1d-4e5a-a7c3-1d2e3f4a5b6c"
@@ -969,14 +971,16 @@ version = "0.1.0"
     [deps.PracticalBayes.extensions]
     PracticalBayesJLD2Ext = "JLD2"
     PracticalBayesOptimizationExt = "Optimization"
+    PracticalBayesPisteExt = "Piste"
 
     [deps.PracticalBayes.weakdeps]
     JLD2 = "033835bb-8acc-5ee8-8aae-3f567f8a3819"
     Optimization = "7f7a1694-90dd-40f0-9382-eb1efda571ba"
+    Piste = "f69a1a94-130c-4fa4-b8d2-e36d656cbe66"
 
 [[deps.PracticalEpiBayes]]
 deps = ["AdvancedHMC", "Distributions", "EpidemicTrajectories", "PracticalBayes", "Random"]
-git-tree-sha1 = "6fcad8f6512c8557215fd9b0d1f2488e00ca8b9f"
+git-tree-sha1 = "525f4b75edbd06da7e6e7fc751b9f4cafc2d2e4c"
 repo-rev = "master"
 repo-url = "https://github.com/EvoArt/PracticalEpiBayes.git"
 uuid = "cd196020-bc6e-475c-bbbe-f14c51ea6e31"
