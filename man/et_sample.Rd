@@ -67,8 +67,9 @@ later.}
 \item{quiet}{Suppress progress messages.}
 }
 \value{
-An object of class \code{et_fit}. For an \code{\link[=et_latent_data]{et_latent_data()}} model,
-\verb{$latents} holds the latent values at the end of the run.
+An object of class \code{et_fit}. For a model with latents (from
+\code{\link[=et_latent_data]{et_latent_data()}}, or \code{et_data(latents = )}), \verb{$latents} holds their
+values at the end of the run.
 }
 \description{
 Fit the model.

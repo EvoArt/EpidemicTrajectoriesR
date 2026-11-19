@@ -33,8 +33,9 @@
 #' @param save_every Flush the archive every this many sweeps.
 #' @param keep_source Optional path to write the generated Julia to.
 #' @param quiet Suppress progress messages.
-#' @return An object of class `et_fit`. For an [et_latent_data()] model,
-#'   `$latents` holds the latent values at the end of the run.
+#' @return An object of class `et_fit`. For a model with latents (from
+#'   [et_latent_data()], or `et_data(latents = )`), `$latents` holds their
+#'   values at the end of the run.
 #' @export
 et_sample <- function(model, blocks = list(), n_sweeps = 1000, n_burn = 0,
                       n_adapts = 0, seed = 1, x_init = NULL,
@@ -48,6 +49,11 @@ et_sample <- function(model, blocks = list(), n_sweeps = 1000, n_burn = 0,
   }
   gen <- et_julia_source(model, blocks)
   mod <- et_load_module(gen, keep_source)
+  has_latents <- !is_latent(model) && length(model$data$latents) > 0
+  if (has_latents) {
+    # The latents' proposal scales adapt over the same warm-up as the HMC blocks.
+    JuliaCall::julia_command(sprintf("%s._ET_ADAPT[] = %s;", mod, julia_int(n_adapts)))
+  }
 
   x_arg <- "nothing"
   if (!is.null(x_init)) {
@@ -89,6 +95,10 @@ et_sample <- function(model, blocks = list(), n_sweeps = 1000, n_burn = 0,
   raw[["_elapsed"]] <- NULL
   latents <- raw[["_latents"]]
   raw[["_latents"]] <- NULL
+  if (has_latents) {
+    latents <- JuliaCall::julia_eval(sprintf(
+      "Dict{String,Any}(String(k) => v for (k, v) in pairs(%s.latents))", mod))
+  }
   draws <- restore_shapes(raw, model)
   if (!quiet) {
     message(sprintf("done in %.1f s (%.3f s/sweep)", elapsed,

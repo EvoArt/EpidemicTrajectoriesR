@@ -319,6 +319,29 @@ et_capture_loglik <- function(captures, i, occasion, x, y, sigma, rate,
        "function.", call. = FALSE)
 }
 
+
+#' Is this the individual being resampled?
+#'
+#' For a rate function. While iFFBS resamples individual `i`, its own share is
+#' taken out of the aggregates, so a rate that reads them (a group's alive count
+#' in a force of infection) sees the group without it. By default ET puts it back
+#' around every rate call, which re-runs the step's shared values for each rate.
+#' With `et_data(focal_self_contribution = FALSE)` it does not, and the rate adds
+#' the individual back itself:
+#'
+#' ```r
+#' n <- data$aggregates$n_alive[g, t] + et_focal(data, i)
+#' ```
+#'
+#' It has no R implementation: calling it outside a transpiled body is an error.
+#'
+#' @param data,i The rate's own arguments.
+#' @return `TRUE` while `i` is being resampled.
+#' @export
+et_focal <- function(data, i) {
+  stop("et_focal() is only meaningful inside a transpiled rate function.", call. = FALSE)
+}
+
 # ---- the data ---------------------------------------------------------------
 
 #' A weighted chain with sampled latent variables.

@@ -87,9 +87,9 @@ test_that("plogis/qlogis take one argument only", {
 })
 
 test_that("dnorm fills in R's defaults and refuses named arguments", {
-  expect_equal(jlq(dnorm(x)), "Distributions.pdf(Distributions.Normal(0, 1), x)")
-  expect_equal(jlq(dnorm(x, m)), "Distributions.pdf(Distributions.Normal(m, 1), x)")
-  expect_equal(jlq(dnorm(x, m, s)), "Distributions.pdf(Distributions.Normal(m, s), x)")
+  expect_equal(jlq(dnorm(x)), "(1 > 0 ? exp(-((x - 0) / 1)^2 / 2) / (1 * sqrt(2pi)) : NaN)")
+  expect_equal(jlq(dnorm(x, m)), "(1 > 0 ? exp(-((x - m) / 1)^2 / 2) / (1 * sqrt(2pi)) : NaN)")
+  expect_equal(jlq(dnorm(x, m, s)), "(s > 0 ? exp(-((x - m) / s)^2 / 2) / (s * sqrt(2pi)) : NaN)")
   expect_error(jlq(dnorm(x, m, s, log = TRUE)), "named arguments")
 })
 
@@ -315,4 +315,99 @@ test_that("a latent model samples, and its latents come back", {
   expect_equal(dim(fit$latents$S), c(1L, LT_Y, LT_N))
   expect_true(all(fit$latents$sex[c(1, 2, 4, 6, 7)] == c(1, 0, 1, 0, 1)))
   expect_error(et_sample(m, x_init = matrix(1L, LT_T, LT_N)), "nothing to start from")
+})
+
+# ---- latents on a sampled-trajectory model ----------------------------------
+
+toy_latent_data <- function(latents) {
+  et_data(
+    n_individuals = TOY_N, n_timepoints = TOY_T,
+    transitions = et_transitions(toy_states,
+      "S -> I" = function(model, data, i, t) plogis(model$alpha + data$latents$u[i]),
+      "I -> S" = toy_recovery),
+    starting_state = toy_start,
+    aggregates = et_aggregate(toy_states,
+      arrays = list(n_infected = et_array("Int", c(TOY_PENS, TOY_T))),
+      update = function(model, data, X, state, i, t) {
+        n_infected[data$group[i], t] <- n_infected[data$group[i], t] + (state == "I")
+      }),
+    group = rep(seq_len(TOY_PENS), each = TOY_PER_PEN),
+    observation_weight = toy_obs, extras = list(y = matrix(-1L, TOY_T, TOY_N)),
+    latents = latents)
+}
+
+test_that("et_data latents are bound, passed to ET, and updated after the iFFBS sweep", {
+  d <- toy_latent_data(et_latents(
+    u = et_per_individual(normal_dist(0, 1), init = rep(0, TOY_N)),
+    S = et_field(1, 3, prior = normal_dist(0, 2), index = function(t) (t + 3) %/% 4)))
+  m <- et_model(d, list(alpha = prior(normal_dist(), init = -2), m = prior(gamma_dist(2, 2), init = 4),
+                        nu = prior(beta_dist(), init = 0.1), theta = prior(beta_dist(), init = 0.5)))
+  src <- et_julia_source(m)$src
+  expect_match(src, "const latents = (; u = _etr_latent_u, S = _etr_latent_S)", fixed = TRUE)
+  expect_match(src, "    latents=latents,", fixed = TRUE)
+  # with latents the observation term is summed without ET's 1e-12 floor
+  expect_match(src, "function et_obsloglik_for(DATA)\n    function obs_loglik(model, data, X)",
+               fixed = TRUE)
+  expect_match(src, "(rng, model, X) -> (sweep(rng, model, X); et_latent_mh!(rng, model, DATA, X))",
+               fixed = TRUE)
+  # u is read by a rate only, S by nothing: each is scored by what reads it
+  expect_match(src, "_et_individual_sweep!(rng, model, DATA, X, latents.u, Normal(0.0, 1.0), :u, false, true)",
+               fixed = TRUE)
+  expect_match(src, "_et_windows(et_index_S, 3, 10), :S, false, false)", fixed = TRUE)
+  # S had no init: drawn from its prior in Julia
+  expect_match(src, "const _etr_latent_S = _etr_draw_coords(Normal(0.0, 2.0), (1, 3, 12))", fixed = TRUE)
+})
+
+test_that("et_data refuses latents it cannot update given X", {
+  expect_error(toy_latent_data(et_latents(X = et_shared_latent(2, 1, prior = normal_dist()))),
+               "shared by every individual")
+  expect_error(toy_latent_data(et_latents(
+    s = et_per_individual(function(model) bernoulli_dist(model$p), init = rep(0, TOY_N)))),
+    "depends on the")
+  expect_error(toy_latent_data(et_latents(u = et_per_individual(normal_dist(), init = rep(0, 3)))),
+               "length 3")
+})
+
+test_that("a shared step and survival give the entry gate a four-argument survival", {
+  tr <- et_transitions(c("S", "I", "D"),
+    shared = function(model, data, i, t) list(p = model$p),
+    survival = et_survival(function(model, data, i, t, shared) shared$p, death = "D"),
+    "S -> I" = ~ 0.1)
+  d <- et_data(n_individuals = 3, n_timepoints = 4, transitions = tr,
+               starting_state = function(model, data, X, i, t) {
+                 p <- numeric(data$n_states)
+                 p[1] <- 1
+                 p
+               },
+               aggregates = et_aggregate(c("S", "I", "D"), arrays = list(a = et_array("Int", 1)),
+                 update = function(model, data, X, state, i, t) a[1] <- a[1] + 0),
+               observation_weight = function(model, data, X, i, t, s) 1)
+  m <- et_model(d, list(p = prior(beta_dist(), init = 0.9)), entry_time = c(1, 2, 3))
+  expect_match(et_julia_source(m)$src,
+               "et_survival_fn(model, data, i, t) = et_survival_fn(model, data, i, t, et_shared(model, data, i, t))",
+               fixed = TRUE)
+})
+
+test_that("et_focal() reads ET's focal index, and only as (data, i)", {
+  expect_equal(jlq(data$aggregates$n_alive[g, t] + et_focal(data, i)),
+               "data.aggregates.n_alive[g, t] + (data._focal[] == i)")
+  expect_error(jlq(et_focal(d, i)), "takes \\(data, i\\)")
+  expect_error(jlq(et_focal(data)), "takes \\(data, i\\)")
+  expect_error(et_focal(), "transpiled rate")
+})
+
+test_that("dnorm brackets compound arguments", {
+  expect_equal(jlq(dnorm(x + 1, a - b, s)),
+               "(s > 0 ? exp(-(((x + 1) - (a - b)) / s)^2 / 2) / (s * sqrt(2pi)) : NaN)")
+})
+
+test_that("transpiled dnorm gives R's values, and NaN rather than an error for a bad sd", {
+  skip_without_julia()
+  cases <- list(c(0.3, 0, 1), c(-1.2, 0.5, 2), c(4, -1, 0.7), c(1, 2 - 3, 1.5))
+  for (k in cases) {
+    src <- et_transpile_expr(substitute(dnorm(X, M, S), list(X = k[1], M = k[2], S = k[3])))
+    expect_equal(et_eval(src), dnorm(k[1], k[2], k[3]), tolerance = 1e-12)
+  }
+  expect_true(is.nan(et_eval(et_transpile_expr(quote(dnorm(1, 0, NaN))))))
+  expect_true(is.nan(et_eval(et_transpile_expr(quote(dnorm(1, 0, -1))))))
 })

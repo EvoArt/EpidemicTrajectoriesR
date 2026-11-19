@@ -206,6 +206,11 @@ is_collapsed <- function(model) is_marginal(model) || is_latent(model)
 # check again on the built data, and its numeric tripwire covers what no
 # declaration can: a rate or callback that reads the latent state.
 check_marginal <- function(data, parameters, entry_time) {
+  if (!is.null(data$latents)) {
+    stop("et_model(): likelihood = \"marginal\" does not take et_data() latents; ",
+         "their update conditions on a sampled trajectory. For latents with the ",
+         "chains summed out, use et_latent_data().", call. = FALSE)
+  }
   if (!is.null(entry_time)) {
     stop("et_model(): likelihood = \"marginal\" does not support `entry_time`. ",
          "The entry gate changes the per-step factor the forward algorithm ",

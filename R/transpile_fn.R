@@ -15,6 +15,8 @@
                         keep_return = TRUE),
   rate_shared    = list(args = c("model", "data", "i", "t", "shared"), vector = FALSE),
   survival_shared = list(args = c("model", "data", "i", "t", "shared"), vector = FALSE),
+  # A coupling term in R: the neighbours' moves as a weight per state of i.
+  rest           = list(args = c("model", "data", "X", "i", "t", "n_states"), vector = TRUE),
   obs_weight_shared = list(args = c("model", "data", "X", "i", "t", "s", "shared"),
                            vector = FALSE),
   # A weighted chain with sampled latents (et_latent_data()): the weights over

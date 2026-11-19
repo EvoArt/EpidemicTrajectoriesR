@@ -305,3 +305,142 @@ run_src_latent <- function(model) {
     paste(init_parts, collapse = ", "), LATENT_BLOCK,
     julia_symbol_vector(model$par_names))
 }
+
+# ---- latents on a sampled-trajectory model (et_data(latents = )) ------------
+#
+# Given the trajectory X, individuals' latents are independent of each other,
+# so each one is updated by random-walk Metropolis from its own terms: its
+# observation weights at the timepoints that read the latent, and its
+# transition probabilities into and out of them. The update runs after the
+# iFFBS sweep in the same Gibbs step, so the parameters' blocks then see both.
+
+augmented_latents_src <- function(d, helpers, add_payload, obs_call, reads) {
+  if (!length(d$latents)) return(NULL)
+  N <- d$n_individuals; T <- d$n_timepoints
+  bindings <- character(); fns <- character(); arrays <- character(); kinds <- character()
+  for (nm in names(d$latents)) {
+    k <- d$latents[[nm]]
+    p <- paste0("_etr_latent_", nm)
+    if (is.numeric(k$init)) {
+      bindings <- c(bindings, if (k$kind == "field") add_payload(p, k$init, "Float64")
+                              else add_payload(p, as.numeric(k$init), "Float64", vector = TRUE))
+    } else if (k$kind == "field") {
+      bindings <- c(bindings, sprintf(
+        "const %s = _etr_draw_coords(%s, (%s, %s, %s))", p, coord_prior_src(k$prior),
+        julia_int(k$dim), julia_int(k$n), julia_int(N)))
+    } else {
+      bindings <- c(bindings, sprintf("const %s = rand(StableRNG(1), %s, %s)", p,
+                                      dist_to_julia(k$prior), julia_int(N)))
+    }
+    arrays <- c(arrays, sprintf("%s = %s", nm, p))
+    if (k$kind == "field") {
+      fns <- c(fns, transpile_plain_fn(k$index, paste0("et_index_", nm), 1L, helpers,
+                                       sprintf("latent '%s': `index`", nm)))
+      kinds <- c(kinds, sprintf(
+        "_et_field_sweep!(rng, model, DATA, X, latents.%s, %s, _et_windows(et_index_%s, %s, %s), %s, %s, %s)",
+        nm, coord_prior_src(k$prior), nm, julia_int(k$n), julia_int(T), julia_symbol(nm),
+        julia_num(reads[[nm]][["obs"]]), julia_num(reads[[nm]][["trans"]])))
+    } else {
+      kinds <- c(kinds, sprintf(
+        "_et_individual_sweep!(rng, model, DATA, X, latents.%s, %s, %s, %s, %s)",
+        nm, dist_to_julia(k$prior), julia_symbol(nm),
+        julia_num(reads[[nm]][["obs"]]), julia_num(reads[[nm]][["trans"]])))
+    }
+  }
+  scales <- vapply(names(d$latents), function(nm)
+    sprintf("%s => %s", julia_symbol(nm), julia_float(d$latents[[nm]]$scale)), character(1))
+  bindings <- c(bindings, sprintf("const latents = (; %s)", paste(arrays, collapse = ", ")))
+  mh <- paste0(
+"# Random-walk Metropolis for the latents, given the trajectory X. Scales adapt
+# towards an acceptance rate of 0.44 while `_ET_ADAPT[]` sweeps remain.
+const _ET_SCALE = Dict{Symbol,Float64}(", paste(scales, collapse = ", "), ")
+const _ET_ADAPT = Ref(0)
+
+_etr_draw_coords(prior, shape) = _etr_draw_coords((prior,), shape)
+function _etr_draw_coords(prior::Tuple, shape)
+    A = zeros(shape); rng = StableRNG(1)
+    for c in 1:shape[1], e in 1:shape[2], i in 1:shape[3]
+        A[c, e, i] = rand(rng, prior[min(c, length(prior))])
+    end
+    A
+end
+_et_coord_logpdf(prior, x, c) = logpdf(prior, x)
+_et_coord_logpdf(prior::Tuple, x, c) = logpdf(prior[c], x)
+
+# The timepoints whose observation may read element e: from the first t with
+# index(t) == e to the first with index(t) == e + 1 (a move reads last year's).
+function _et_windows(index, n, T)
+    first_t = [something(findfirst(t -> index(t) == e, 1:T), 0) for e in 1:n]
+    [first_t[e] == 0 ? (1:0) : first_t[e]:(e < n && first_t[e + 1] > 0 ? first_t[e + 1] : T)
+     for e in 1:n]
+end
+
+# Individual i's log terms over timepoints lo..hi: observation weights there
+# (when the latent is read by an observation), and the transitions out of
+# lo - 1 .. hi (when read by a transition), clipped to its sampling period.
+function _et_terms(model, DATA, X, i, lo, hi, obs, trans)
+    a, b = DATA.sampling_period[i]
+    ll = 0.0
+    if obs
+        for t in max(lo, a):min(hi, b)
+            ll += log(", obs_call, ")
+        end
+    end
+    if trans
+        for t in max(lo - 1, a):min(hi, b - 1)
+            ll += log(transition_prob(TRANS, model, DATA, X, i, t, X[t, i], X[t + 1, i]))
+        end
+    end
+    ll
+end
+
+_et_accept(rng, l0, l1) = l0 == -Inf ? l1 > -Inf : log(rand(rng)) < l1 - l0
+
+function _et_adapt!(name, accepted, proposed)
+    _ET_ADAPT[] > 0 && proposed > 0 || return
+    _ET_SCALE[name] *= exp(accepted / proposed - 0.44)
+end
+
+function _et_field_sweep!(rng, model, DATA, X, A, prior, windows, name, obs, trans)
+    s = _ET_SCALE[name]; acc = 0; prop = 0
+    old = zeros(size(A, 1))
+    for i in axes(A, 3), e in axes(A, 2)
+        w = windows[e]
+        isempty(w) && continue
+        lp(i, e) = sum(_et_coord_logpdf(prior, A[c, e, i], c) for c in axes(A, 1))
+        l0 = _et_terms(model, DATA, X, i, first(w), last(w), obs, trans) + lp(i, e)
+        for c in axes(A, 1)
+            old[c] = A[c, e, i]; A[c, e, i] += s * randn(rng)
+        end
+        l1 = _et_terms(model, DATA, X, i, first(w), last(w), obs, trans) + lp(i, e)
+        prop += 1
+        if _et_accept(rng, l0, l1)
+            acc += 1
+        else
+            for c in axes(A, 1); A[c, e, i] = old[c]; end
+        end
+    end
+    _et_adapt!(name, acc, prop)
+end
+
+function _et_individual_sweep!(rng, model, DATA, X, v, prior, name, obs, trans)
+    s = _ET_SCALE[name]; acc = 0; prop = 0
+    T = DATA.n_timepoints
+    for i in eachindex(v)
+        old = v[i]
+        l0 = _et_terms(model, DATA, X, i, 1, T, obs, trans) + logpdf(prior, old)
+        v[i] = old + s * randn(rng)
+        l1 = _et_terms(model, DATA, X, i, 1, T, obs, trans) + logpdf(prior, v[i])
+        prop += 1
+        _et_accept(rng, l0, l1) ? (acc += 1) : (v[i] = old)
+    end
+    _et_adapt!(name, acc, prop)
+end
+
+function et_latent_mh!(rng, model, DATA, X)
+", paste0("    ", kinds, collapse = "\n"), "
+    _ET_ADAPT[] = max(_ET_ADAPT[] - 1, 0)
+    nothing
+end")
+  list(bindings = bindings, fns = fns, mh = mh)
+}

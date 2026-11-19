@@ -45,11 +45,27 @@
 #'   optimisation, and often a large one.
 #' @param coupling_transitions An optional separate [et_transitions()] used for
 #'   the coupling term only (ET's `coupling_trans_mat`). Power users only.
-#' @param rest_contribution An [et_julia()] replacing the whole coupling term.
+#' @param rest_contribution The coupling term, replacing ET's default: the
+#'   neighbours' moves as a weight per state of the individual being resampled.
+#'   An R function `(model, data, X, i, t, n_states)` returning that vector, or
+#'   an [et_julia()] body. Worth writing when the coupling reduces to a few
+#'   counts per group, which the default (scoring every neighbour) cannot see.
 #' @param focal_self_contribution See ET's `epidemic_data`; leave `TRUE` unless
 #'   your rate functions already do the focal's own accounting.
 #' @param extras Named list of your own arrays, reachable as `data$name`.
 #' @param helpers List of [et_helper()] declarations callable from any body.
+#' @param latents Optional [et_latents()] of [et_field()] and
+#'   [et_per_individual()] declarations: values the rates and observations read
+#'   as `data$latents$name` that are not hidden states, such as an activity
+#'   centre each year. Each sweep, after the trajectory is resampled, every
+#'   individual's latents get a random-walk Metropolis update given its
+#'   trajectory, scored by its own observation weights and transition
+#'   probabilities over the timepoints that read them. They must therefore
+#'   affect only their own individual: a latent that feeds an aggregate is not
+#'   supported. Priors must not depend on the parameters. With latents, the
+#'   observation term is summed exactly, without the 1e-12 ET adds to each weight
+#'   before the log: such weights are often densities, which the floor would
+#'   change.
 #' @return An object of class `et_data`.
 #' @export
 et_data <- function(n_individuals, n_timepoints, transitions, starting_state,
@@ -59,7 +75,7 @@ et_data <- function(n_individuals, n_timepoints, transitions, starting_state,
                     likelihood_weight = NULL, sampling_period = NULL, affected_individuals = NULL,
                     coupled_transitions = NULL, coupling_transitions = NULL,
                     rest_contribution = NULL, focal_self_contribution = TRUE,
-                    extras = list(), helpers = list()) {
+                    extras = list(), helpers = list(), latents = NULL) {
   if (!inherits(transitions, "et_transitions")) {
     stop("et_data(): `transitions` must come from et_transitions().", call. = FALSE)
   }
@@ -103,7 +119,7 @@ et_data <- function(n_individuals, n_timepoints, transitions, starting_state,
     }
     check_julia_name(names(extras), "extras name")
     reserved <- c("aggregates", "state_space", "n_states", "n_individuals",
-                  "n_timepoints", "sampling_period", "trans_mat", "group")
+                  "n_timepoints", "sampling_period", "trans_mat", "group", "latents")
     clash <- intersect(names(extras), reserved)
     if (length(clash)) {
       stop("et_data(): extras name(s) clash with fields ET already defines on ",
@@ -144,6 +160,35 @@ et_data <- function(n_individuals, n_timepoints, transitions, starting_state,
            call. = FALSE)
     }
   }
+  if (!is.null(latents)) {
+    if (!inherits(latents, "et_latents")) {
+      stop("et_data(): `latents` must come from et_latents().", call. = FALSE)
+    }
+    for (nm in names(latents)) {
+      k <- latents[[nm]]
+      if (k$kind == "shared") {
+        stop("et_data(): latent '", nm, "' is shared by every individual. With a ",
+             "sampled trajectory only per-individual latents are supported: ",
+             "et_field() and et_per_individual().", call. = FALSE)
+      }
+      if (is.function(k$prior)) {
+        stop("et_data(): latent '", nm, "' has a prior that depends on the ",
+             "parameters, which a sampled-trajectory model does not support.",
+             call. = FALSE)
+      }
+      if (k$kind == "field" && is.null(k$index)) {
+        stop("et_data(): latent '", nm, "' must give `index`.", call. = FALSE)
+      }
+      if (!is.null(k$observed) || !is.null(k$allowed)) {
+        stop("et_data(): latent '", nm, "': `observed` and `allowed` are not ",
+             "supported with a sampled trajectory.", call. = FALSE)
+      }
+      if (!is.null(k$init) && !is.numeric(k$init)) {
+        stop("et_data(): latent '", nm, "' needs a numeric `init`.", call. = FALSE)
+      }
+      check_latent_values(k, nm, n_individuals, extras)
+    }
+  }
 
   structure(list(
     n_individuals = n_individuals, n_timepoints = n_timepoints,
@@ -159,7 +204,7 @@ et_data <- function(n_individuals, n_timepoints, transitions, starting_state,
     coupling_transitions = coupling_transitions,
     rest_contribution = rest_contribution,
     focal_self_contribution = isTRUE(focal_self_contribution),
-    extras = extras, helpers = helpers), class = "et_data")
+    extras = extras, helpers = helpers, latents = latents), class = "et_data")
 }
 
 #' @export
@@ -174,6 +219,9 @@ print.et_data <- function(x, ...) {
             collapse = " + "), "\n", sep = "")
   if (length(x$extras)) {
     cat("  extras: ", paste(names(x$extras), collapse = ", "), "\n", sep = "")
+  }
+  if (length(x$latents)) {
+    cat("  latents: ", paste(names(x$latents), collapse = ", "), "\n", sep = "")
   }
   invisible(x)
 }

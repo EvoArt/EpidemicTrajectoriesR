@@ -347,6 +347,14 @@ transpile_list <- function(e, ctx) {
 transpile_call <- function(e, ctx, op) {
   args <- as.list(e)[-1L]
   if (op == "et_capture_loglik") return(transpile_capture_loglik(args, ctx))
+  # et_focal(data, i): whether i is the individual iFFBS is resampling, whose own
+  # share is then out of the aggregates. ET keeps that index in `data._focal`.
+  if (op == "et_focal") {
+    if (length(args) != 2L || !identical(args[[1]], quote(data))) {
+      stop("transpile: et_focal() takes (data, i).", call. = FALSE)
+    }
+    return(sprintf("(data._focal[] == %s)", et_transpile_expr(args[[2]], ctx)))
+  }
   if (!is.null(names(args)) && any(nzchar(names(args)))) {
     stop("transpile: named arguments are not supported in a transpiled call ",
          "(`", op, "`); pass them positionally.", call. = FALSE)
@@ -382,8 +390,15 @@ transpile_call <- function(e, ctx, op) {
     }
     a <- c(arg_src, "0", "1")[1:3]
     if (length(arg_src) == 2L) a[3] <- "1"
-    return(sprintf("Distributions.pdf(Distributions.Normal(%s, %s), %s)",
-                   a[2], a[3], a[1]))
+    simple <- grepl("^([A-Za-z_][A-Za-z0-9_.]*(\\[[^]]*\\])?|[0-9.]+)$", a)
+    a[!simple] <- paste0("(", a[!simple], ")")
+    # The density written out rather than Distributions' Normal, whose
+    # constructor throws on a NaN or non-positive sd. A diverging HMC proposal
+    # produces exactly that, and an exception ends the run where a NaN only
+    # rejects the proposal. A negative sd gives NaN, as in R; so does sd = 0,
+    # where R gives a point mass.
+    return(sprintf("(%3$s > 0 ? exp(-((%1$s - %2$s) / %3$s)^2 / 2) / (%3$s * sqrt(2pi)) : NaN)",
+                   a[1], a[2], a[3]))
   }
   # `c(...)` as the per-state weights of a weighted chain: a tuple, every entry
   # in the parameter type so each return site has the same concrete type.
@@ -423,8 +438,8 @@ transpile_call <- function(e, ctx, op) {
   stop("transpile: call to unsupported function '", op, "'.\n",
        "  Allowed: ", paste(sort(names(.et_builtin_map)), collapse = ", "),
        ", nrow, ncol, seq_len, seq_along, rep, numeric, ifelse, plogis, qlogis,\n",
-       "  dnorm, et_capture_loglik,",
-       "  plus operators and any function declared with et_helper().\n",
+       "  dnorm, et_capture_loglik, plus operators and any function declared with",
+       " et_helper().\n",
        "  If '", op, "' is your own function, declare it as a helper; if it has ",
        "no Julia equivalent, use et_julia().", call. = FALSE)
 }

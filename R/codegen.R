@@ -75,9 +75,9 @@ generate_module <- function(model, blocks, module_name) {
   # A payload entry is an R array assigned into Julia's `Main` before the module
   # loads; the module re-binds it with an explicit element type, so nothing
   # downstream depends on how JuliaCall happened to marshal it.
-  add_payload <- function(name, value) {
+  add_payload <- function(name, value, el = NULL, vector = FALSE) {
     payload[[paste0(prefix, name)]] <<- value
-    julia_typed_binding(name, paste0("Main.", prefix, name), value)
+    julia_typed_binding(name, paste0("Main.", prefix, name), value, el, vector)
   }
 
   helpers <- d$helpers
@@ -110,11 +110,22 @@ generate_module <- function(model, blocks, module_name) {
                            if (is.null(shared$name)) "survival" else "survival_shared",
                            surv_name, helpers, shared$reads)
     fn_src <- c(fn_src, r$src)
+    # ET's entry gate calls the survival function without the step's shared
+    # values, so it gets a method that works them out itself.
+    if (!is.null(shared$name)) {
+      fn_src <- c(fn_src, sprintf("%s(model, data, i, t) = %s(model, data, i, t, %s(model, data, i, t))",
+                                  surv_name, surv_name, shared$name))
+    }
     epi_reads <- union(epi_reads, r$reads); epi_opaque <- epi_opaque || r$opaque
   }
+  # What the transitions read, for the latent update to know which terms a
+  # latent can move.
+  trans_text <- paste(fn_src, collapse = "\n")
   r <- et_transpile_role(d$starting_state, "starting_state", "et_starting_state",
                          helpers)
   fn_src <- c(fn_src, r$src)
+  start_text <- r$src
+  n_before_obs <- length(fn_src)
   epi_reads <- union(epi_reads, r$reads); epi_opaque <- epi_opaque || r$opaque
   # The aggregate update can read parameters too; those reach the likelihood
   # through the arrays the rates then read, so they belong to the epidemic term.
@@ -166,6 +177,13 @@ generate_module <- function(model, blocks, module_name) {
     fn_src <- c(fn_src, sprintf(
       "function et_rest_contribution(model, data, X, i, t, n_states, affected_override=nothing)\n%s\nend",
       indent(d$rest_contribution$src)))
+  } else if (is.function(d$rest_contribution)) {
+    # An R coupling term, transpiled like any other role. It returns a weight
+    # per state of i, so allocations follow the parameter type.
+    r <- et_transpile_role(d$rest_contribution, "rest", "et_rest_body", helpers)
+    fn_src <- c(fn_src, r$src, paste0(
+      "et_rest_contribution(model, data, X, i, t, n_states, affected_override=nothing) =\n",
+      "    et_rest_body(model, data, X, i, t, n_states)"))
   }
 
   # A separate coupling spec: the rates ET evaluates for the coupling term only,
@@ -215,6 +233,33 @@ generate_module <- function(model, blocks, module_name) {
     entry_expr <- NULL
   }
 
+  # Latents (et_data(latents = )): their arrays, their index functions, and
+  # their update given X, which scores the full observation weight.
+  obs_call <- if (!is.null(obs_weight_name) && !is.null(obs_shared$name)) {
+    sprintf("%s(model, DATA, X, i, t, X[t, i], %s(model, DATA, i, t))",
+            obs_weight_name, obs_shared$name)
+  } else if (!is.null(obs_weight_name)) {
+    sprintf("%s(model, DATA, X, i, t, X[t, i])", obs_weight_name)
+  } else if (!is.null(obs_process_name)) {
+    sprintf("%s(model, DATA, X, i, t)[X[t, i]]", obs_process_name)
+  } else "1.0"
+  obs_text <- paste(fn_src[-seq_len(n_before_obs)], collapse = "\n")
+  helper_text <- paste(helper_src, collapse = "\n")
+  latent_reads <- lapply(stats::setNames(nm = names(d$latents)), function(nm) {
+    pat <- sprintf("latents\\.%s\\b", nm)
+    if (grepl(pat, start_text, perl = TRUE)) {
+      stop("et_data(): the starting state reads latent '", nm, "', which the latent ",
+           "update does not score. Read it in the rates or observations only.",
+           call. = FALSE)
+    }
+    in_helpers <- grepl(pat, helper_text, perl = TRUE)
+    c(trans = in_helpers || grepl(pat, trans_text, perl = TRUE),
+      obs = in_helpers || grepl(pat, obs_text, perl = TRUE))
+  })
+  lat <- augmented_latents_src(d, helpers, add_payload, obs_call, latent_reads)
+  bindings <- c(bindings, lat$bindings)
+  fn_src <- c(fn_src, lat$fns)
+
   # --- spec blocks -----------------------------------------------------------
   states_src <- sprintf("const STATES = %s", julia_symbol_vector(states))
   trans_src <- transitions_src("TRANS", d$transitions, rate_names, surv_name,
@@ -248,7 +293,7 @@ generate_module <- function(model, blocks, module_name) {
   aggs_src <- aggregate_src(agg)
   data_src <- data_src_for(d, obs_process_name, obs_weight_name,
                            !is.null(coupling_names), summary_names,
-                           obs_shared$name)
+                           obs_shared$name, has_latents = !is.null(lat))
 
   # Each artefact is written as a function of the data and then applied to
   # DATA, so a fit uses the constants and each artefact can be rebuilt from
@@ -263,7 +308,27 @@ generate_module <- function(model, blocks, module_name) {
     },
     "\nconst LOGLIK = et_loglik_for(DATA)")
   has_obs <- !is.null(obs_process_name) || !is.null(obs_weight_name)
-  obsll_src <- if (!has_obs) NULL else paste0(
+  obsll_src <- if (!has_obs) NULL else if (!is.null(lat)) paste0(
+    # ET's epidemic_obs_loglik adds 1e-12 to each weight before the log, which
+    # suits a probability. With latents the weights are often densities (a
+    # centre's move, a capture location), and the floor would change a small one,
+    # so the term is summed here exactly.
+    "function et_obsloglik_for(DATA)\n",
+    "    function obs_loglik(model, data, X)\n",
+    "        ll = zero(mapreduce(eltype, promote_type, values(model)))\n",
+    "        for i in 1:DATA.n_individuals\n",
+    "            a, b = DATA.sampling_period[i]\n",
+    "            for t in a:b\n",
+    "                ll += log(",
+    if (!is.null(lik_weight_name))
+      sprintf("%s(model, DATA, X, i, t, X[t, i])", lik_weight_name) else obs_call, ")\n",
+    "            end\n",
+    "        end\n",
+    "        ll\n",
+    "    end\n",
+    "end",
+    "\nconst OBSLOGLIK = et_obsloglik_for(DATA)")
+  else paste0(
     if (!is.null(lik_weight_name)) sprintf(
       "et_obsloglik_for(DATA) = epidemic_obs_loglik(DATA; observation_weight=%s)",
       lik_weight_name)
@@ -281,6 +346,12 @@ generate_module <- function(model, blocks, module_name) {
     "\net_marginal_threads(adtype) = adtype isa ADTypes.AutoForwardDiff ? Threads.nthreads() : 1",
     "\net_latent_for(DATA) = nothing",
     "\nconst LATENT! = nothing")
+  else if (!is.null(lat)) paste0(
+    "# The trajectory, then the latents given it, in one Gibbs step.\n",
+    sprintf("function et_latent_for(DATA)\n    sweep = epidemic_latent_sampler(DATA%s)\n",
+            if (isTRUE(traj_block(blocks)$mh)) "; mh=true" else ""),
+    "    (rng, model, X) -> (sweep(rng, model, X); et_latent_mh!(rng, model, DATA, X))\nend",
+    "\nconst LATENT! = et_latent_for(DATA)")
   else paste0(
     sprintf("et_latent_for(DATA) = epidemic_latent_sampler(DATA%s)",
             if (isTRUE(traj_block(blocks)$mh)) "; mh=true" else ""),
@@ -326,6 +397,7 @@ generate_module <- function(model, blocks, module_name) {
       section("transitions", c(trans_src, coupling_src)),
       section("aggregates", c(summary_src, aggs_src)),
       section("data", data_src),
+      section("latent variables, given the trajectory", qualify_base(lat$mh)),
       section("generated artefacts",
               qualify_base(c(loglik_src, obsll_src, latent_src))),
       section("placeholders for conjugate-owned parameters", placeholder_src),
@@ -531,7 +603,8 @@ qualify_aggregates <- function(src, array_names) {
 }
 
 data_src_for <- function(d, obs_process_name, obs_weight_name, has_coupling,
-                         summary_names = character(), obs_shared_name = NULL) {
+                         summary_names = character(), obs_shared_name = NULL,
+                         has_latents = FALSE) {
   kw <- c(
     sprintf("n_individuals=%s", julia_int(d$n_individuals)),
     sprintf("n_timepoints=%s", julia_int(d$n_timepoints)),
@@ -558,8 +631,10 @@ data_src_for <- function(d, obs_process_name, obs_weight_name, has_coupling,
       paste(vapply(d$coupled_transitions, function(p)
         sprintf("(%s, %s)", julia_symbol(p[1]), julia_symbol(p[2])), character(1)),
         collapse = ", ")),
-    if (inherits(d$rest_contribution, "et_julia")) "rest_contribution=et_rest_contribution",
+    if (inherits(d$rest_contribution, "et_julia") || is.function(d$rest_contribution))
+      "rest_contribution=et_rest_contribution",
     if (!d$focal_self_contribution) "focal_self_contribution=false",
+    if (has_latents) "latents=latents",
     vapply(names(d$extras), function(nm) sprintf("%s=%s", nm, nm), character(1))
   )
   kw <- kw[!vapply(kw, is.null, logical(1))]

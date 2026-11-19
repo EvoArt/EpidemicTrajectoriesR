@@ -75,6 +75,21 @@ test_that("a vector-returning role gets the parameter-type prologue", {
   expect_match(s, "p = zeros(ETR_T, data.n_states)", fixed = TRUE)
 })
 
+test_that("an R coupling function is transpiled and passed to epidemic_data", {
+  m <- toy_model()
+  m$data$rest_contribution <- function(model, data, X, i, t, n_states) {
+    w <- rep(1, n_states)
+    if (t < data$n_timepoints) w[2] <- exp(-model$beta)
+    w
+  }
+  s <- et_julia_source(m)$src
+  expect_match(s, "function et_rest_body(model, data, X, i, t, n_states)",
+               fixed = TRUE)
+  expect_match(s, "w = ones(ETR_T, n_states)", fixed = TRUE)
+  expect_match(s, "et_rest_body(model, data, X, i, t, n_states)", fixed = TRUE)
+  expect_match(s, "rest_contribution=et_rest_contribution", fixed = TRUE)
+})
+
 test_that("a scalar role converts every returned value to the parameter type", {
   # Otherwise `return(1)` (Int) and `return(1 - theta)` make the Julia return
   # type a Union -- runtime dispatch in the hottest function in the package.

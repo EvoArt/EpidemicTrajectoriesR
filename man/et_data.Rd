@@ -22,7 +22,8 @@ et_data(
   rest_contribution = NULL,
   focal_self_contribution = TRUE,
   extras = list(),
-  helpers = list()
+  helpers = list(),
+  latents = NULL
 )
 }
 \arguments{
@@ -80,7 +81,11 @@ optimisation, and often a large one.}
 \item{coupling_transitions}{An optional separate \code{\link[=et_transitions]{et_transitions()}} used for
 the coupling term only (ET's \code{coupling_trans_mat}). Power users only.}
 
-\item{rest_contribution}{An \code{\link[=et_julia]{et_julia()}} replacing the whole coupling term.}
+\item{rest_contribution}{The coupling term, replacing ET's default: the
+neighbours' moves as a weight per state of the individual being resampled.
+An R function \verb{(model, data, X, i, t, n_states)} returning that vector, or
+an \code{\link[=et_julia]{et_julia()}} body. Worth writing when the coupling reduces to a few
+counts per group, which the default (scoring every neighbour) cannot see.}
 
 \item{focal_self_contribution}{See ET's \code{epidemic_data}; leave \code{TRUE} unless
 your rate functions already do the focal's own accounting.}
@@ -88,6 +93,19 @@ your rate functions already do the focal's own accounting.}
 \item{extras}{Named list of your own arrays, reachable as \code{data$name}.}
 
 \item{helpers}{List of \code{\link[=et_helper]{et_helper()}} declarations callable from any body.}
+
+\item{latents}{Optional \code{\link[=et_latents]{et_latents()}} of \code{\link[=et_field]{et_field()}} and
+\code{\link[=et_per_individual]{et_per_individual()}} declarations: values the rates and observations read
+as \code{data$latents$name} that are not hidden states, such as an activity
+centre each year. Each sweep, after the trajectory is resampled, every
+individual's latents get a random-walk Metropolis update given its
+trajectory, scored by its own observation weights and transition
+probabilities over the timepoints that read them. They must therefore
+affect only their own individual: a latent that feeds an aggregate is not
+supported. Priors must not depend on the parameters. With latents, the
+observation term is summed exactly, without the 1e-12 ET adds to each weight
+before the log: such weights are often densities, which the floor would
+change.}
 }
 \value{
 An object of class \code{et_data}.
