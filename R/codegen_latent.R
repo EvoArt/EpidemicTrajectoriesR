@@ -401,6 +401,14 @@ function _et_adapt!(name, accepted, proposed)
     _ET_SCALE[name] *= exp(accepted / proposed - 0.44)
 end
 
+# An element no term reads, given X, has its prior as its conditional: a
+# proposal that leaves its terms exactly unchanged shows that, and the element
+# is then drawn from its prior. Only the others count towards adapting the
+# step, since the prior-only ones accept almost anything and would push it far
+# past what the constrained ones take.
+_et_coord_rand(rng, prior, c) = rand(rng, prior)
+_et_coord_rand(rng, prior::Tuple, c) = rand(rng, prior[c])
+
 function _et_field_sweep!(rng, model, DATA, X, A, prior, windows, name, obs, trans)
     s = _ET_SCALE[name]; acc = 0; prop = 0
     old = zeros(size(A, 1))
@@ -408,13 +416,18 @@ function _et_field_sweep!(rng, model, DATA, X, A, prior, windows, name, obs, tra
         w = windows[e]
         isempty(w) && continue
         lp(i, e) = sum(_et_coord_logpdf(prior, A[c, e, i], c) for c in axes(A, 1))
-        l0 = _et_terms(model, DATA, X, i, first(w), last(w), obs, trans) + lp(i, e)
+        t0 = _et_terms(model, DATA, X, i, first(w), last(w), obs, trans)
+        l0 = t0 + lp(i, e)
         for c in axes(A, 1)
             old[c] = A[c, e, i]; A[c, e, i] += s * randn(rng)
         end
-        l1 = _et_terms(model, DATA, X, i, first(w), last(w), obs, trans) + lp(i, e)
+        t1 = _et_terms(model, DATA, X, i, first(w), last(w), obs, trans)
+        if t1 == t0
+            for c in axes(A, 1); A[c, e, i] = _et_coord_rand(rng, prior, c); end
+            continue
+        end
         prop += 1
-        if _et_accept(rng, l0, l1)
+        if _et_accept(rng, l0, t1 + lp(i, e))
             acc += 1
         else
             for c in axes(A, 1); A[c, e, i] = old[c]; end
@@ -428,11 +441,15 @@ function _et_individual_sweep!(rng, model, DATA, X, v, prior, name, obs, trans)
     T = DATA.n_timepoints
     for i in eachindex(v)
         old = v[i]
-        l0 = _et_terms(model, DATA, X, i, 1, T, obs, trans) + logpdf(prior, old)
+        t0 = _et_terms(model, DATA, X, i, 1, T, obs, trans)
         v[i] = old + s * randn(rng)
-        l1 = _et_terms(model, DATA, X, i, 1, T, obs, trans) + logpdf(prior, v[i])
+        t1 = _et_terms(model, DATA, X, i, 1, T, obs, trans)
+        if t1 == t0
+            v[i] = rand(rng, prior)
+            continue
+        end
         prop += 1
-        _et_accept(rng, l0, l1) ? (acc += 1) : (v[i] = old)
+        _et_accept(rng, t0 + logpdf(prior, old), t1 + logpdf(prior, v[i])) ? (acc += 1) : (v[i] = old)
     end
     _et_adapt!(name, acc, prop)
 end
