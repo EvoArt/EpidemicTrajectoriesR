@@ -27,7 +27,19 @@
   latent_start   = list(args = c("model", "data", "i"),                vector = TRUE,
                         tuple = TRUE),
   latent_obs     = list(args = c("model", "data", "i", "t", "shared"), vector = TRUE,
-                        tuple = TRUE, alt_args = c("model", "data", "i", "t"))
+                        tuple = TRUE, alt_args = c("model", "data", "i", "t")),
+  # What the observations at every timepoint of one key need, once per
+  # individual and key: a number (converted to the parameter type, as a scalar
+  # role's return is) or a list() (each field converted, as a shared step's).
+  latent_obs_shared = list(args = c("model", "data", "i", "key"), vector = FALSE,
+                           keep_return = TRUE, wrap_scalar = TRUE),
+  # Values computed once per likelihood evaluation and merged into `model`. Its
+  # list() keeps whole numbers and logicals as they are, so they can index, and
+  # its vectors are allocated in the parameter type.
+  per_evaluation = list(args = c("model", "data"), vector = FALSE,
+                        keep_return = TRUE, settle_list = TRUE, typed_alloc = TRUE),
+  # An extra term of the log density, over the parameters alone.
+  log_density    = list(args = "model", vector = FALSE)
 )
 
 #' The call protocols a user function can be transpiled into.
@@ -115,7 +127,8 @@ print.et_helper <- function(x, ...) {
 # rate that reads `shared`, whatever the shared step function reads. They enter
 # the element-type prologue and the returned reads alike.
 et_transpile_role <- function(f, role, name, helpers = list(),
-                              extra_reads = character(), n_states = NULL) {
+                              extra_reads = character(), n_states = NULL,
+                              float_floor = FALSE) {
   spec <- .et_protocols[[role]]
   if (is.null(spec)) {
     stop("unknown role '", role, "'. One of: ",
@@ -141,8 +154,10 @@ et_transpile_role <- function(f, role, name, helpers = list(),
     stop("internal: the ", role, " role needs the number of states.", call. = FALSE)
   }
 
-  ctx <- new_ctx(helpers = helper_names, vector_result = spec$vector,
-                 typed_list = isTRUE(spec$keep_return),
+  ctx <- new_ctx(helpers = helper_names,
+                 vector_result = spec$vector || isTRUE(spec$typed_alloc),
+                 typed_list = isTRUE(spec$keep_return) && !isTRUE(spec$settle_list),
+                 settle_list = isTRUE(spec$settle_list),
                  tuple_c = if (isTRUE(spec$tuple)) n_states)
   # A scalar role must return one concrete type. An R body naturally mixes
   # `return(1)` (an Int) with `return(1 - eta)` (whatever the parameters are),
@@ -150,7 +165,10 @@ et_transpile_role <- function(f, role, name, helpers = list(),
   # function in the package. Converting every returned value to `ETR_T` fixes it
   # without the user having to think about it, and `ETR_T` is the promotion of
   # exactly the parameters this body reads.
-  fbody <- if (spec$vector || isTRUE(spec$keep_return)) body(f) else wrap_returns_in_T(body(f))
+  fbody <- if (spec$vector) body(f)
+           else if (isTRUE(spec$wrap_scalar)) wrap_returns_in_T(body(f), skip_list = TRUE)
+           else if (isTRUE(spec$keep_return)) body(f)
+           else wrap_returns_in_T(body(f))
   body_src <- transpile_braced_body(fbody, ctx)
   reads <- ctx$reads$model
   used_helpers <- ctx$reads$helpers
@@ -162,7 +180,7 @@ et_transpile_role <- function(f, role, name, helpers = list(),
                        function(h) inherits(h$f, "et_julia") && is.null(h$f$reads),
                        logical(1)))
 
-  prologue <- eltype_prologue(reads)
+  prologue <- eltype_prologue(reads, float_floor)
   full <- if (length(prologue)) paste0(prologue, "\n", body_src) else body_src
   list(src = sprintf("function %s(%s)\n%s\nend", name,
                      paste(spec$args, collapse = ", "), indent(full)),
@@ -193,9 +211,14 @@ ET_TYPE_VAR <- "ETR_T"
 # Everything the generator emits against it, `convert(ETR_T, x)`, `one(ETR_T)`,
 # `zeros(ETR_T, n)`: is defined across all three families. A type CONSTRUCTOR
 # call would not be.
-eltype_prologue <- function(reads) {
+#
+# `float_floor` adds Float64 to the promotion. Parameters are always floating
+# point, but a value `per_evaluation` adds to `model` may be a whole number or a
+# logical (a grid index, a flag), and a body reading only those would otherwise
+# get an integer `ETR_T` and fail to convert its first fraction.
+eltype_prologue <- function(reads, float_floor = FALSE) {
   if (!length(reads)) return(paste0(ET_TYPE_VAR, " = Float64"))
-  sprintf("%s = promote_type(%s)", ET_TYPE_VAR,
+  sprintf("%s = promote_type(%s%s)", ET_TYPE_VAR, if (float_floor) "Float64, " else "",
           paste(sprintf("eltype(model.%s)", reads), collapse = ", "))
 }
 
@@ -206,8 +229,14 @@ eltype_prologue <- function(reads) {
 #                         keeps its readable multi-line `if` form
 # A `for` loop or an assignment as the terminal statement returns nothing
 # meaningful, so it is left alone.
-wrap_returns_in_T <- function(node) {
-  Tcall <- function(x) as.call(list(as.symbol(ET_TYPE_VAR), x))
+#
+# With `skip_list`, a returned `list(...)` is left alone: its fields are
+# converted one by one instead (a role that may return a number or a list).
+wrap_returns_in_T <- function(node, skip_list = FALSE) {
+  Tcall <- function(x) {
+    if (skip_list && is.call(x) && identical(x[[1]], as.symbol("list"))) return(x)
+    as.call(list(as.symbol(ET_TYPE_VAR), x))
+  }
   if (!is.call(node)) return(Tcall(node))
   head <- as.character(node[[1]])
   if (head == "return" && length(node) == 2L) {
@@ -218,14 +247,14 @@ wrap_returns_in_T <- function(node) {
     n <- length(node)
     if (n >= 2L) {
       # Interior statements may still hold early `return`s.
-      for (k in 2:(n - 1)) node[[k]] <- wrap_inner_returns(node[[k]])
-      node[[n]] <- wrap_returns_in_T(node[[n]])
+      for (k in 2:(n - 1)) node[[k]] <- wrap_inner_returns(node[[k]], skip_list)
+      node[[n]] <- wrap_returns_in_T(node[[n]], skip_list)
     }
     return(node)
   }
   if (head == "if") {
-    node[[3]] <- wrap_returns_in_T(node[[3]])
-    if (length(node) == 4L) node[[4]] <- wrap_returns_in_T(node[[4]])
+    node[[3]] <- wrap_returns_in_T(node[[3]], skip_list)
+    if (length(node) == 4L) node[[4]] <- wrap_returns_in_T(node[[4]], skip_list)
     return(node)
   }
   if (head %in% c("for", "while", "<-", "=")) return(node)
@@ -233,14 +262,17 @@ wrap_returns_in_T <- function(node) {
 }
 
 # Wrap `return(x)` anywhere inside a statement, without touching its value.
-wrap_inner_returns <- function(node) {
+wrap_inner_returns <- function(node, skip_list = FALSE) {
   if (!is.call(node)) return(node)
   head <- as.character(node[[1]])
   if (head == "return" && length(node) == 2L) {
-    node[[2]] <- as.call(list(as.symbol(ET_TYPE_VAR), node[[2]]))
+    v <- node[[2]]
+    if (!(skip_list && is.call(v) && identical(v[[1]], as.symbol("list")))) {
+      node[[2]] <- as.call(list(as.symbol(ET_TYPE_VAR), v))
+    }
     return(node)
   }
-  for (k in seq_along(node)[-1]) node[[k]] <- wrap_inner_returns(node[[k]])
+  for (k in seq_along(node)[-1]) node[[k]] <- wrap_inner_returns(node[[k]], skip_list)
   node
 }
 

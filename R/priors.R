@@ -104,6 +104,10 @@ print.custom_dist <- function(x, ...) {
 
 # Render a prior as Julia source.
 dist_to_julia <- function(d) {
+  if (inherits(d, "dist_list")) {
+    return(sprintf("PracticalBayes.arraydist([%s])",
+                   paste(vapply(unclass(d), dist_to_julia, character(1)), collapse = ", ")))
+  }
   if (isTRUE(d$truncate)) {
     lo <- if (is.na(d$args[[2]])) "-Inf" else julia_float(d$args[[2]])
     hi <- if (is.na(d$args[[3]])) "Inf" else julia_float(d$args[[3]])

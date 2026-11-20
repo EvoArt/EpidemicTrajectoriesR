@@ -13,7 +13,12 @@ et_latent_data(
   latents,
   sampling_period = NULL,
   extras = list(),
-  helpers = list()
+  helpers = list(),
+  observation_shared = NULL,
+  shared_key = NULL,
+  n_keys = NULL,
+  per_evaluation = NULL,
+  cache = FALSE
 )
 }
 \arguments{
@@ -37,6 +42,36 @@ individual.}
 \code{\link[=et_spatial_captures]{et_spatial_captures()}} object may be one of them.}
 
 \item{helpers}{List of \code{\link[=et_helper]{et_helper()}} declarations callable from any body.}
+
+\item{observation_shared}{Optional \verb{function(model, data, i, key)}: whatever
+the observation weights at every timepoint with \code{shared_key(t) == key}
+need, computed once per individual and key and handed to
+\code{observation_weights} as its fifth argument, \code{shared}. It returns a number,
+or a named \code{list()} read as \code{shared$name}. Worth it for an expensive term
+common to several timepoints, such as a year's capture likelihood.}
+
+\item{shared_key, n_keys}{\verb{function(t)} giving the key of timepoint \code{t}, and
+the number of keys (keys run from 1 to \code{n_keys}). Left out, every
+timepoint is its own key.}
+
+\item{per_evaluation}{Optional \verb{function(model, data)} returning a named
+\code{list()} of values computed once per likelihood evaluation rather than at
+every step (a random walk's cumulative sum, a table of rates, a
+reparameterisation). The values are added to \code{model}, so every other body
+reads them as \code{model$name}. Vectors are allocated in the parameters' number
+type (\code{numeric(n)}), and every number in the list is converted to it unless
+it is a whole number or a logical, which stay as they are so they can index.}
+
+\item{cache}{\code{TRUE} to reuse observation values an HMC block cannot change:
+a block that moves none of the parameters \code{observation_shared} reads reuses
+the shared values, and one that moves none of the parameters the
+observations read reuses the observation weights. Which parameters those are
+is worked out from the bodies, as for \verb{depends=}, through \code{per_evaluation}
+and the helpers. A named list \code{list(shared = , weights = , latents = )}
+gives them by hand instead (needed only when a body is an \code{\link[=et_julia]{et_julia()}}
+without \code{reads}); it is checked against what the bodies read, and refused
+if it leaves any out, since a stale cache is silently wrong. \code{latents}
+names the latents \code{observation_shared} reads (all of them if left out).}
 }
 \value{
 An object of class \code{et_latent_data}.

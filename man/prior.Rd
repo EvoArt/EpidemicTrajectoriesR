@@ -12,12 +12,15 @@ et_par(...)
 \arguments{
 \item{dist}{The prior distribution: \code{\link[=beta_dist]{beta_dist()}}, \code{\link[=gamma_dist]{gamma_dist()}} and
 friends, or \code{\link[=custom_dist]{custom_dist()}} for anything else. Omit only for
-\code{kind = "latent"}.}
+\code{kind = "latent"}. For a vector parameter whose elements have different
+priors, a list of distributions, one per element (emitted as
+\code{PracticalBayes.arraydist}).}
 
 \item{init}{Initial value. Length must match \code{n} (or \code{prod(dim)}).}
 
 \item{n}{Length of a vector parameter; \code{1} for a scalar. A vector parameter is
-emitted as \code{PracticalBayes.filldist(dist, n)}.}
+emitted as \code{PracticalBayes.filldist(dist, n)}. With a list \code{dist}, it
+defaults to the list's length.}
 
 \item{dim}{Dimensions of a matrix-valued parameter (\code{kind = "latent"} only).}
 

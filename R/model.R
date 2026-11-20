@@ -4,10 +4,13 @@
 #'
 #' @param dist The prior distribution: [beta_dist()], [gamma_dist()] and
 #'   friends, or [custom_dist()] for anything else. Omit only for
-#'   `kind = "latent"`.
+#'   `kind = "latent"`. For a vector parameter whose elements have different
+#'   priors, a list of distributions, one per element (emitted as
+#'   `PracticalBayes.arraydist`).
 #' @param init Initial value. Length must match `n` (or `prod(dim)`).
 #' @param n Length of a vector parameter; `1` for a scalar. A vector parameter is
-#'   emitted as `PracticalBayes.filldist(dist, n)`.
+#'   emitted as `PracticalBayes.filldist(dist, n)`. With a list `dist`, it
+#'   defaults to the list's length.
 #' @param dim Dimensions of a matrix-valued parameter (`kind = "latent"` only).
 #' @param kind `"sampled"` (the default) for a parameter with a prior, or
 #'   `"latent"` for one **owned by a conjugate kernel**: emitted as a
@@ -23,7 +26,26 @@
 prior <- function(dist = NULL, init, n = 1L, dim = NULL,
                   kind = c("sampled", "latent")) {
   kind <- match.arg(kind)
-  if (kind == "sampled" && !inherits(dist, "custom_dist")) {
+  # One distribution per element: `list(beta_dist(..), beta_dist(..))`.
+  if (is.list(dist) && !inherits(dist, "custom_dist")) {
+    if (!length(dist) || !all(vapply(dist, inherits, logical(1), "custom_dist"))) {
+      stop("prior(): a list `dist` must hold one distribution per element.",
+           call. = FALSE)
+    }
+    if (missing(n)) n <- length(dist)
+    if (n != length(dist)) {
+      stop("prior(): `dist` has ", length(dist), " distributions but n = ", n, ".",
+           call. = FALSE)
+    }
+    if (n < 2L) {
+      stop("prior(): a list of distributions is for a vector parameter; give ",
+           "one distribution for a scalar.", call. = FALSE)
+    }
+    if (kind != "sampled") {
+      stop("prior(): a list of distributions is for a sampled parameter.", call. = FALSE)
+    }
+    dist <- structure(dist, class = c("dist_list", "custom_dist"))
+  } else if (kind == "sampled" && !inherits(dist, "custom_dist")) {
     stop("prior(): a sampled parameter needs a distribution from ",
          "normal_dist(), gamma_dist(), beta_dist(), ... (or custom_dist() ",
          "for anything else).", call. = FALSE)
@@ -81,10 +103,18 @@ print.prior <- function(x, ...) {
 #'
 #'   For an [et_latent_data()] model this is ignored: its chains are always
 #'   summed out, and its latent variables are the latent block.
+#' @param log_density Extra terms of the log density over the parameters alone:
+#'   a `function(model)`, or a list of them, each returning a number that is
+#'   added to the log density (PracticalBayes' `@addlogprob!`). For what a prior
+#'   cannot say: a penalty (towards `Se + Sp > 1`, say), or the log-Jacobian of
+#'   a parameter sampled through a transformation, with its carrier's prior
+#'   cancelled. The bodies are transpiled like the rest of the model, may call
+#'   the data's helpers, and may use [et_logpdf()]; `model$x` reads the
+#'   parameters and the `derived` values.
 #' @return An object of class `et_model`.
 #' @export
 et_model <- function(data, parameters, derived = list(), entry_time = NULL,
-                     likelihood = c("augmented", "marginal")) {
+                     likelihood = c("augmented", "marginal"), log_density = list()) {
   likelihood <- match.arg(likelihood)
   latent <- inherits(data, "et_latent_data")
   if (!inherits(data, "et_data") && !latent) {
@@ -174,13 +204,69 @@ et_model <- function(data, parameters, derived = list(), entry_time = NULL,
 
   if (likelihood == "marginal") check_marginal(data, parameters, entry_time)
 
+  if (is.function(log_density) || inherits(log_density, "et_julia")) {
+    log_density <- list(log_density)
+  }
+  if (!is.list(log_density)) {
+    stop("et_model(): `log_density` must be a function(model), or a list of them.",
+         call. = FALSE)
+  }
+  for (k in seq_along(log_density)) {
+    f <- log_density[[k]]
+    if (inherits(f, "et_julia")) next
+    if (!is.function(f) || !identical(names(formals(f)), "model")) {
+      stop("et_model(): log_density term ", k, " must be a function(model).",
+           call. = FALSE)
+    }
+  }
+
   # The reference set every downstream check uses: which names a parameter
   # expression may legally mention.
   structure(list(data = data, parameters = parameters, derived = derived,
                  entry_time = entry_time, likelihood = likelihood,
+                 log_density = unname(log_density),
                  par_names = names(parameters),
                  all_names = c(names(parameters), names(derived))),
             class = "et_model")
+}
+
+# The log_density terms: their functions, and for each, what it reads. A term
+# that reads a name that is neither a parameter nor a derived value would fail
+# at run time with a missing field, so it is refused here.
+log_density_terms <- function(model) {
+  helpers <- model$data$helpers %||% list()
+  lapply(seq_along(model$log_density), function(k) {
+    nm <- sprintf("et_log_density_%d", k)
+    r <- et_transpile_role(model$log_density[[k]], "log_density", nm, helpers)
+    unknown <- setdiff(r$reads, model$all_names)
+    if (length(unknown)) {
+      stop("et_model(): log_density term ", k, " reads model$",
+           paste(unknown, collapse = ", model$"), ", which is not a parameter or ",
+           "a derived value.", call. = FALSE)
+    }
+    list(name = nm, src = r$src,
+         depends = if (r$opaque) NULL else expand_to_sampled(r$reads, model))
+  })
+}
+
+log_density_depends <- function(model) {
+  terms <- log_density_terms(model)
+  stats::setNames(lapply(terms, `[[`, "depends"),
+                  vapply(terms, `[[`, character(1), "name"))
+}
+
+# The model-body lines adding each term; `depends=` where the term's reads are
+# known and the model kind takes it.
+log_density_lines <- function(model, with_depends = TRUE) {
+  vapply(log_density_terms(model), function(t) {
+    dep <- if (with_depends && !is.null(t$depends))
+      paste0("  depends=", julia_symbol_tuple(t$depends)) else ""
+    sprintf("@addlogprob! %s(pars)%s", t$name, dep)
+  }, character(1))
+}
+
+log_density_src <- function(model) {
+  vapply(log_density_terms(model), `[[`, character(1), "src")
 }
 
 is_marginal <- function(model) identical(model$likelihood, "marginal")

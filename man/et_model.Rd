@@ -9,7 +9,8 @@ et_model(
   parameters,
   derived = list(),
   entry_time = NULL,
-  likelihood = c("augmented", "marginal")
+  likelihood = c("augmented", "marginal"),
+  log_density = list()
 )
 }
 \arguments{
@@ -48,6 +49,15 @@ trajectory to mix over.
 
 For an \code{\link[=et_latent_data]{et_latent_data()}} model this is ignored: its chains are always
 summed out, and its latent variables are the latent block.}
+
+\item{log_density}{Extra terms of the log density over the parameters alone:
+a \verb{function(model)}, or a list of them, each returning a number that is
+added to the log density (PracticalBayes' \verb{@addlogprob!}). For what a prior
+cannot say: a penalty (towards \code{Se + Sp > 1}, say), or the log-Jacobian of
+a parameter sampled through a transformation, with its carrier's prior
+cancelled. The bodies are transpiled like the rest of the model, may call
+the data's helpers, and may use \code{\link[=et_logpdf]{et_logpdf()}}; \code{model$x} reads the
+parameters and the \code{derived} values.}
 }
 \value{
 An object of class \code{et_model}.

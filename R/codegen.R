@@ -393,7 +393,7 @@ generate_module <- function(model, blocks, module_name) {
       julia_usings(),
       section("payload from R", qualify_base(bindings)),
       section("state space", states_src),
-      section("user functions", c(helper_src, fn_src)),
+      section("user functions", c(helper_src, fn_src, log_density_src(model))),
       section("transitions", c(trans_src, coupling_src)),
       section("aggregates", c(summary_src, aggs_src)),
       section("data", data_src),
@@ -675,6 +675,7 @@ placeholder_defs <- function(model) {
 
 par_dist_src <- function(nm, p) {
   if (p$kind == "latent") return(sprintf("_ETPlaceholder_%s()", nm))
+  if (inherits(p$prior, "dist_list")) return(dist_to_julia(p$prior))
   if (p$n > 1L) {
     return(sprintf("PracticalBayes.filldist(%s, %s)", dist_to_julia(p$prior),
                    julia_int(p$n)))
@@ -704,6 +705,7 @@ pb_model_src <- function(model, has_obs, dep_epi, dep_obs) {
     lines <- c(lines, sprintf("@addlogprob! obs_loglik_fn(pars, data, X)%s",
                               dep(dep_obs)))
   }
+  lines <- c(lines, log_density_lines(model))
   note <- paste0(
     "# `depends=` is DERIVED, not declared: every transpiled body records which\n",
     "# `model$x` it reads, transitively through helpers, and the union is what\n",
@@ -734,7 +736,8 @@ pb_marginal_model_src <- function(model, dep) {
                             paste(sprintf("%s=%s", pars, pars), collapse = ", ")))
   lines <- c(lines, sprintf("@addlogprob! marginal_fn(pars, data)%s",
                             if (is.null(dep)) "" else
-                              paste0("  depends=", julia_symbol_tuple(dep))))
+                              paste0("  depends=", julia_symbol_tuple(dep))),
+             log_density_lines(model))
   paste0(
     "# The hidden trajectories are summed out by the forward algorithm, so this\n",
     "# one term is the whole likelihood: starting state, transitions AND\n",

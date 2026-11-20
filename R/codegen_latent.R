@@ -24,24 +24,60 @@ generate_latent_module <- function(model, blocks, module_name) {
 
   helpers <- d$helpers
   fn_src <- character()
+  # With per_evaluation, a body may read a whole number or a logical it added
+  # to `model`, so its number type is floored at Float64.
+  pe <- !is.null(d$per_evaluation)
+  role <- function(f, r, nm, extra = character(), n = NULL) {
+    et_transpile_role(f, r, nm, helpers, extra, n_states = n, float_floor = pe)
+  }
+
+  # --- once per evaluation ----------------------------------------------------
+  if (pe) {
+    pe_names <- names(per_eval_field_reads(d$per_evaluation, helpers))
+    clash <- intersect(pe_names, model$all_names)
+    if (length(clash)) {
+      stop("et_latent_data(): per_evaluation returns ", paste(clash, collapse = ", "),
+           ", which would replace the parameter(s) of that name.", call. = FALSE)
+    }
+    fn_src <- c(fn_src, SETTLE_SRC,
+                role(d$per_evaluation, "per_evaluation", "et_per_evaluation")$src)
+  }
 
   # --- weights, starting state, observations --------------------------------
-  shared <- shared_role(d$transitions$shared, "et_shared", helpers)
+  shared <- if (is.null(d$transitions$shared)) shared_role(NULL, "et_shared", helpers)
+            else {
+              r <- role(d$transitions$shared, "shared", "et_shared")
+              list(name = "et_shared", src = r$src, reads = r$reads, opaque = r$opaque)
+            }
   fn_src <- c(fn_src, shared$src)
   rate_role <- if (is.null(shared$name)) "rate" else "rate_shared"
   rate_names <- character()
   for (tr in d$transitions$transitions) {
     nm <- sprintf("et_weight_%s_%s", tr$from, tr$to)
-    fn_src <- c(fn_src, et_transpile_role(tr$rate, rate_role, nm, helpers, shared$reads)$src)
+    fn_src <- c(fn_src, role(tr$rate, rate_role, nm, shared$reads)$src)
     rate_names[paste0(tr$from, "->", tr$to)] <- nm
   }
-  fn_src <- c(fn_src, et_transpile_role(d$starting_state, "latent_start",
-                                        "et_starting_state", helpers, n_states = K)$src)
-  if (!is.null(d$observation_weights)) {
-    fn_src <- c(fn_src, et_transpile_role(d$observation_weights, "latent_obs",
-                                          "et_observation_weights", helpers,
-                                          n_states = K)$src)
+  fn_src <- c(fn_src, role(d$starting_state, "latent_start", "et_starting_state", n = K)$src)
+  obs_shared <- list(reads = character(), opaque = FALSE)
+  if (!is.null(d$observation_shared)) {
+    obs_shared <- role(d$observation_shared, "latent_obs_shared", "et_observation_shared")
+    fn_src <- c(fn_src, obs_shared$src)
   }
+  obs <- list(reads = character(), opaque = FALSE)
+  if (!is.null(d$observation_weights)) {
+    # The observations read `shared`, so their number type must cover whatever
+    # observation_shared reads, as a rate's covers its shared step's: otherwise a
+    # shared value carrying derivatives is converted to a plain number.
+    obs <- role(d$observation_weights, "latent_obs", "et_observation_weights",
+                extra = obs_shared$reads, n = K)
+    obs$opaque <- obs$opaque || obs_shared$opaque
+    fn_src <- c(fn_src, obs$src)
+  }
+  if (!is.null(d$shared_key)) {
+    fn_src <- c(fn_src, transpile_plain_fn(d$shared_key, "et_shared_key", 1L, helpers,
+                                           "et_latent_data(): `shared_key`"))
+  }
+  cache <- cache_src(model, obs_shared, obs)
 
   # --- extras ---------------------------------------------------------------
   bindings <- character()
@@ -77,6 +113,11 @@ generate_latent_module <- function(model, blocks, module_name) {
           sprintf("n_timepoints=%s", julia_int(d$n_timepoints)),
           "trans_mat=TRANS", "starting_state=et_starting_state",
           if (!is.null(d$observation_weights)) "observation_weights=et_observation_weights",
+          if (!is.null(d$observation_shared)) "observation_shared=et_observation_shared",
+          if (!is.null(d$shared_key)) c("shared_key=et_shared_key",
+                                        sprintf("n_keys=%s", julia_int(d$n_keys))),
+          if (pe) "per_evaluation=et_per_evaluation",
+          if (!is.null(cache)) sprintf("cache=%s", cache$src),
           "latents=LATENTS", "init=LATENT_INIT",
           if (!is.null(d$sampling_period)) "sampling_period=_etr_sampling_period_pairs",
           vapply(names(d$extras), function(nm) sprintf("%s=%s", nm, nm), character(1)))
@@ -96,7 +137,8 @@ generate_latent_module <- function(model, blocks, module_name) {
       julia_usings(),
       section("payload from R", qualify_base(bindings)),
       section("state space", states_src),
-      section("user functions", c(et_transpile_helpers(helpers), fn_src)),
+      section("user functions", c(et_transpile_helpers(helpers), fn_src,
+                                  log_density_src(model))),
       section("weighted transitions", trans_src),
       section("latent variables", c(latents_src, init_src)),
       section("data", data_src),
@@ -110,8 +152,179 @@ generate_latent_module <- function(model, blocks, module_name) {
     sprintf("\n\nend # module %s\n", module_name))
 
   list(src = src, payload = payload, module = module_name, blocks = blocks,
-       depends = list(latent = NULL), model = model)
+       depends = c(list(latent = NULL), log_density_depends(model)), model = model,
+       cache = if (!is.null(cache)) cache[c("shared", "weights")])
 }
+
+# ---- what each per_evaluation value reads -----------------------------------
+#
+# The cache is keyed on the parameters a body reads, and a body may read a value
+# `per_evaluation` added to `model`. Charging such a read with everything
+# `per_evaluation` reads would make the capture term depend on every movement
+# parameter, and the cache would never be used, so each returned field is
+# traced back to the parameters it is computed from: through locals, element
+# assignments, loops, the conditions it is computed under, and helpers.
+# Over-counting is the safe direction throughout (a stale cache is silently
+# wrong), so a local's reads only ever grow, and the pass repeats until they
+# stop growing, which carries reads around a loop.
+#
+# Returns a named list, field -> parameter names, or NULL when the body cannot
+# be traced (an et_julia(), or a return that is not a list()).
+per_eval_field_reads <- function(f, helpers) {
+  if (is.null(f) || inherits(f, "et_julia")) return(NULL)
+  helper_names <- vapply(helpers, function(h) h$name, character(1))
+  deps <- new.env(parent = emptyenv())
+  fields <- list()
+  traceable <- TRUE
+  changed <- FALSE
+
+  add <- function(nm, r) {
+    old <- if (exists(nm, deps, inherits = FALSE)) get(nm, deps) else character()
+    new <- union(old, r)
+    if (length(new) > length(old)) changed <<- TRUE
+    assign(nm, new, deps)
+  }
+  reads_of <- function(e) {
+    if (is.symbol(e)) {
+      nm <- as.character(e)
+      return(if (exists(nm, deps, inherits = FALSE)) get(nm, deps) else character())
+    }
+    if (!is.call(e)) return(character())
+    if (identical(e[[1]], as.symbol("$")) && identical(e[[2]], quote(model))) {
+      return(as.character(e[[3]]))
+    }
+    out <- character()
+    if (is.symbol(e[[1]]) && as.character(e[[1]]) %in% helper_names) {
+      out <- helper_reads(as.character(e[[1]]), helpers)
+    }
+    for (a in as.list(e)[-1L]) out <- union(out, reads_of(a))
+    out
+  }
+  record <- function(lst, ctrl) {
+    nms <- names(lst)[-1L]
+    for (k in seq_along(nms)) {
+      fields[[nms[k]]] <<- union(fields[[nms[k]]], union(reads_of(lst[[k + 1L]]), ctrl))
+    }
+  }
+  is_list_call <- function(e) is.call(e) && identical(e[[1]], as.symbol("list"))
+  walk <- function(e, ctrl, last) {
+    if (!is.call(e)) {
+      if (last) traceable <<- FALSE
+      return(invisible())
+    }
+    head <- as.character(e[[1]])
+    if (head == "{") {
+      n <- length(e)
+      for (k in seq_len(n)[-1L]) walk(e[[k]], ctrl, last && k == n)
+    } else if (head %in% c("<-", "=")) {
+      lhs <- e[[2]]
+      r <- union(reads_of(e[[3]]), ctrl)
+      if (is.call(lhs)) {           # x[k] <- v: the index matters too
+        r <- union(r, reads_of(lhs))
+        lhs <- lhs[[2]]
+      }
+      add(as.character(lhs), r)
+    } else if (head == "if") {
+      c2 <- union(ctrl, reads_of(e[[2]]))
+      walk(e[[3]], c2, last)
+      if (length(e) == 4L) walk(e[[4]], c2, last) else if (last) traceable <<- FALSE
+    } else if (head == "for") {
+      r <- union(reads_of(e[[3]]), ctrl)
+      add(as.character(e[[2]]), r)
+      walk(e[[4]], r, FALSE)
+    } else if (head == "return") {
+      if (length(e) == 2L && is_list_call(e[[2]])) record(e[[2]], ctrl) else traceable <<- FALSE
+    } else if (head == "list") {
+      if (last) record(e, ctrl)
+    } else if (last) {
+      traceable <<- FALSE
+    }
+    invisible()
+  }
+  repeat {
+    changed <- FALSE
+    walk(body(f), character(), TRUE)
+    if (!changed) break
+  }
+  if (!traceable || !length(fields)) return(NULL)
+  fields
+}
+
+# The sampled parameters behind a body's reads, a value per_evaluation adds
+# resolved to what that value is computed from.
+cache_reads <- function(reads, model, pe_fields, what) {
+  out <- expand_to_sampled(intersect(reads, model$all_names), model)
+  for (nm in setdiff(reads, model$all_names)) {
+    if (is.null(pe_fields[[nm]])) {
+      stop("et_latent_data(): ", what, " reads model$", nm, ", which is not a ",
+           "parameter, a derived value, or a value per_evaluation returns.",
+           call. = FALSE)
+    }
+    out <- union(out, expand_to_sampled(pe_fields[[nm]], model))
+  }
+  out
+}
+
+# The `cache = (; ...)` keyword, or NULL for none.
+cache_src <- function(model, obs_shared, obs) {
+  d <- model$data
+  cc <- d$cache
+  if (is.null(cc)) return(NULL)
+  pe_fields <- per_eval_field_reads(d$per_evaluation, d$helpers)
+  traced <- !obs_shared$opaque && !obs$opaque &&
+    (is.null(d$per_evaluation) || !is.null(pe_fields) ||
+       !length(setdiff(union(obs_shared$reads, obs$reads), model$all_names)))
+  if (traced) {
+    shared <- cache_reads(obs_shared$reads, model, pe_fields, "observation_shared")
+    weights <- setdiff(cache_reads(obs$reads, model, pe_fields, "observation_weights"),
+                       shared)
+  }
+  if (isTRUE(cc$derive)) {
+    if (!traced) {
+      stop("et_latent_data(): cache = TRUE cannot work out what the observations ",
+           "read, because ", if (obs_shared$opaque || obs$opaque)
+             "a body is an et_julia() without `reads`"
+           else "per_evaluation does not end in a list() of its values",
+           ". Give `cache = list(shared = , weights = )` by hand.", call. = FALSE)
+    }
+  } else {
+    given <- list(shared = cc$shared %||% character(), weights = cc$weights %||% character())
+    unknown <- setdiff(unlist(given), model$all_names)
+    if (length(unknown)) {
+      stop("et_latent_data(): `cache` names unknown parameter(s): ",
+           paste(unknown, collapse = ", "), ".", call. = FALSE)
+    }
+    if (traced) {
+      miss_s <- setdiff(shared, given$shared)
+      miss_w <- setdiff(weights, union(given$shared, given$weights))
+      if (length(miss_s) || length(miss_w)) {
+        stop("et_latent_data(): `cache` leaves out parameters the observations ",
+             "read, so their values would go stale: ",
+             if (length(miss_s)) paste0("shared needs ", paste(miss_s, collapse = ", "), "; "),
+             if (length(miss_w)) paste0("weights needs ", paste(miss_w, collapse = ", "), "; "),
+             "or use cache = TRUE.", call. = FALSE)
+      }
+    }
+    shared <- expand_to_sampled(given$shared, model)
+    weights <- setdiff(expand_to_sampled(given$weights, model), shared)
+  }
+  parts <- c(sprintf("shared = %s", julia_symbol_tuple(shared)),
+             sprintf("weights = %s", julia_symbol_tuple(weights)),
+             if (!is.null(cc$latents)) sprintf("latents = %s", julia_symbol_tuple(cc$latents)))
+  list(src = sprintf("(; %s)", paste(parts, collapse = ", ")),
+       shared = shared, weights = weights)
+}
+
+# Values per_evaluation adds to `model`: a number in the parameter type, a whole
+# number or a logical as it is (it may index or branch), arrays and tuples
+# element by element.
+SETTLE_SRC <- paste(
+  "_etr_settle(::Type{T}, x::Union{Integer,Bool}) where {T} = x",
+  "_etr_settle(::Type{T}, x::Real) where {T} = convert(T, x)",
+  "_etr_settle(::Type{T}, x::Tuple) where {T} = map(v -> _etr_settle(T, v), x)",
+  "_etr_settle(::Type{T}, x::AbstractArray{<:Union{Integer,Bool}}) where {T} = x",
+  "_etr_settle(::Type{T}, x::AbstractArray{<:Real}) where {T} = convert(Array{T}, x)",
+  "_etr_settle(::Type{T}, x) where {T} = x", sep = "\n")
 
 # A spatial-captures extra: its arrays as payload, then ET's constructor.
 captures_binding <- function(nm, x, add_payload) {
@@ -248,8 +461,11 @@ pb_latent_model_src <- function(model) {
   pars <- c(model$par_names, names(model$derived))
   lines <- c(lines,
              sprintf("%s ~ LatentBlock(data)", LATENT_BLOCK),
-             sprintf("@addlogprob! latent_loglik((; %s), data, %s)",
-                     paste(sprintf("%s=%s", pars, pars), collapse = ", "), LATENT_BLOCK))
+             sprintf("pars = (; %s)", paste(sprintf("%s=%s", pars, pars), collapse = ", ")),
+             sprintf("@addlogprob! latent_loglik(pars, data, %s)", LATENT_BLOCK),
+             # Like the likelihood term, these carry no depends=: every block
+             # evaluates them.
+             log_density_lines(model, with_depends = FALSE))
   sprintf("@model function et_the_model(data)\n%s\nend",
           indent(paste(lines, collapse = "\n")))
 }

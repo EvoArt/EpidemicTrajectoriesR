@@ -28,6 +28,10 @@
 #' @param tuple_c The number of states, in a role whose `c(...)` is the
 #'   per-state weights of a weighted chain; `NULL` elsewhere, where `c()` is
 #'   refused.
+#' @param typed_list `TRUE` where every `list()` field is converted to the
+#'   parameter type (a shared step's values).
+#' @param settle_list `TRUE` in `per_evaluation`, whose `list()` fields are
+#'   converted to the parameter type unless they are whole numbers or logicals.
 #' @param state_codes `TRUE` where the body becomes a plain Julia function
 #'   rather than an `@aggregate` line: `state` then arrives as the integer code,
 #'   and no macro is there to turn a Symbol into one, so a name compared against
@@ -35,7 +39,8 @@
 #' @keywords internal
 new_ctx <- function(helpers = character(), vector_result = FALSE,
                     state_syms = FALSE, states = character(), reads = NULL,
-                    state_codes = FALSE, typed_list = FALSE, tuple_c = NULL) {
+                    state_codes = FALSE, typed_list = FALSE, tuple_c = NULL,
+                    settle_list = FALSE) {
   if (is.null(reads)) {
     reads <- new.env(parent = emptyenv())
     reads$model <- character()
@@ -44,7 +49,8 @@ new_ctx <- function(helpers = character(), vector_result = FALSE,
   }
   list(helpers = helpers, vector_result = vector_result,
        state_syms = state_syms, states = states, reads = reads,
-       state_codes = state_codes, typed_list = typed_list, tuple_c = tuple_c)
+       state_codes = state_codes, typed_list = typed_list, tuple_c = tuple_c,
+       settle_list = settle_list)
 }
 
 # Maths / builtin calls allowed in a body, mapped R-name -> Julia-name.
@@ -340,6 +346,13 @@ transpile_list <- function(e, ctx) {
     # read by name, so sorting them costs nothing.
     o <- order(nms, method = "radix")
     nms <- nms[o]; vals <- vals[o]
+  } else if (isTRUE(ctx$settle_list)) {
+    # Values computed once per evaluation: a number in the parameter type, a
+    # whole number or a logical left as it is, so it can still index or branch.
+    ctx$reads$uses_type <- TRUE
+    vals <- sprintf("_etr_settle(%s, %s)", ET_TYPE_VAR, vals)
+    o <- order(nms, method = "radix")
+    nms <- nms[o]; vals <- vals[o]
   }
   paste0("(; ", paste(sprintf("%s = %s", nms, vals), collapse = ", "), ")")
 }
@@ -359,7 +372,26 @@ transpile_call <- function(e, ctx, op) {
     stop("transpile: named arguments are not supported in a transpiled call ",
          "(`", op, "`); pass them positionally.", call. = FALSE)
   }
+  if (op == "et_logpdf") return(transpile_logpdf(args, ctx))
   arg_src <- vapply(args, et_transpile_expr, character(1), ctx = ctx)
+
+  # `as.integer(x)` truncates toward zero, as `trunc(Int, x)` does, negative x
+  # included. Where R gives NA (NaN, or out of the integer range) Julia throws:
+  # the loud direction. On a dual number it truncates the value.
+  if (op == "as.integer") {
+    if (length(arg_src) != 1L) {
+      stop("transpile: as.integer() takes one argument.", call. = FALSE)
+    }
+    return(sprintf("trunc(Int, %s)", arg_src))
+  }
+  # On a single number both mean the same; Julia has no NA, so is.finite(NA)
+  # has nothing to differ over.
+  if (op %in% c("is.finite", "is.nan")) {
+    if (length(arg_src) != 1L) {
+      stop("transpile: ", op, "() takes one number.", call. = FALSE)
+    }
+    return(sprintf("%s(%s)", if (op == "is.finite") "isfinite" else "isnan", arg_src))
+  }
 
   # Vector allocation. In a vector-returning role these must follow the PARAMETER
   # scalar type, or the function throws the moment its parameters move into an
@@ -438,10 +470,63 @@ transpile_call <- function(e, ctx, op) {
   stop("transpile: call to unsupported function '", op, "'.\n",
        "  Allowed: ", paste(sort(names(.et_builtin_map)), collapse = ", "),
        ", nrow, ncol, seq_len, seq_along, rep, numeric, ifelse, plogis, qlogis,\n",
-       "  dnorm, et_capture_loglik, plus operators and any function declared with",
+       "  dnorm, as.integer, is.finite, is.nan, et_logpdf, et_capture_loglik,\n",
+       "  plus operators and any function declared with",
        " et_helper().\n",
        "  If '", op, "' is your own function, declare it as a helper; if it has ",
        "no Julia equivalent, use et_julia().", call. = FALSE)
+}
+
+# et_logpdf(normal_dist(m, s), x) -> Distributions.logpdf(Distributions.Normal(m, s), x).
+# The distribution is written as the same constructor call a prior uses, its
+# arguments positionally; exponential_dist() takes a rate, Julia's Exponential
+# a scale, as everywhere else.
+transpile_logpdf <- function(args, ctx) {
+  if (length(args) != 2L || (!is.null(names(args)) && any(nzchar(names(args))))) {
+    stop("transpile: et_logpdf() takes a distribution and a value, positionally.",
+         call. = FALSE)
+  }
+  d <- args[[1]]
+  head <- if (is.call(d) && is.symbol(d[[1]])) as.character(d[[1]]) else ""
+  if (!head %in% names(.et_dist_ctors)) {
+    stop("transpile: et_logpdf()'s distribution must be a call to one of ",
+         paste0(names(.et_dist_ctors), "()", collapse = ", "), ".", call. = FALSE)
+  }
+  dargs <- as.list(d)[-1L]
+  if (!is.null(names(dargs)) && any(nzchar(names(dargs)))) {
+    stop("transpile: pass the distribution's arguments positionally.", call. = FALSE)
+  }
+  src <- vapply(dargs, et_transpile_expr, character(1), ctx = ctx)
+  if (head == "exponential_dist") src <- sprintf("1 / (%s)", if (length(src)) src else "1")
+  sprintf("Distributions.logpdf(Distributions.%s(%s), %s)", .et_dist_ctors[[head]],
+          paste(src, collapse = ", "), et_transpile_expr(args[[2]], ctx))
+}
+
+#' The log density of a distribution at a value.
+#'
+#' For use inside a transpiled body, e.g. an [et_model()] `log_density` term,
+#' where `et_logpdf(normal_dist(m, s), x)` becomes Distributions.jl's
+#' `logpdf(Normal(m, s), x)`. In R it evaluates the same density, so a body
+#' using it still runs.
+#'
+#' @param dist A call to [normal_dist()], [beta_dist()], [gamma_dist()],
+#'   [uniform_dist()], [exponential_dist()], [bernoulli_dist()] or
+#'   [discrete_uniform_dist()].
+#' @param x The value.
+#' @return The log density.
+#' @export
+et_logpdf <- function(dist, x) {
+  a <- dist$args
+  switch(dist$name,
+    Normal = stats::dnorm(x, a[[1]], a[[2]], log = TRUE),
+    Beta = stats::dbeta(x, a[[1]], a[[2]], log = TRUE),
+    Gamma = stats::dgamma(x, shape = a[[1]], scale = a[[2]], log = TRUE),
+    Uniform = stats::dunif(x, a[[1]], a[[2]], log = TRUE),
+    Exponential = stats::dexp(x, 1 / a[[1]], log = TRUE),
+    Bernoulli = stats::dbinom(x, 1, a[[1]], log = TRUE),
+    DiscreteUniform = if (x == round(x) && x >= a[[1]] && x <= a[[2]])
+      -log(a[[2]] - a[[1]] + 1) else -Inf,
+    stop("et_logpdf(): no R density for ", dist$name, ".", call. = FALSE))
 }
 
 transpile_tuple_c <- function(arg_src, ctx) {

@@ -12,7 +12,8 @@ new_ctx(
   reads = NULL,
   state_codes = FALSE,
   typed_list = FALSE,
-  tuple_c = NULL
+  tuple_c = NULL,
+  settle_list = FALSE
 )
 }
 \arguments{
@@ -36,9 +37,15 @@ rather than an \verb{@aggregate} line: \code{state} then arrives as the integer 
 and no macro is there to turn a Symbol into one, so a name compared against
 \code{state} must be emitted as its code too.}
 
+\item{typed_list}{\code{TRUE} where every \code{list()} field is converted to the
+parameter type (a shared step's values).}
+
 \item{tuple_c}{The number of states, in a role whose \code{c(...)} is the
 per-state weights of a weighted chain; \code{NULL} elsewhere, where \code{c()} is
 refused.}
+
+\item{settle_list}{\code{TRUE} in \code{per_evaluation}, whose \code{list()} fields are
+converted to the parameter type unless they are whole numbers or logicals.}
 }
 \description{
 Create a transpiler context.

@@ -132,6 +132,17 @@ latents <- et_latents(
 Spatial capture-recapture data go in through `et_spatial_captures()` and are
 scored inside the observation function with `et_capture_loglik()`.
 
+Work that does not need doing at every step can be moved out of it.
+`per_evaluation` computes values once per likelihood evaluation (a random walk's
+cumulative sum, a reparameterisation) and adds them to `model`.
+`observation_shared` computes a term once per individual and key (say, a year's
+capture likelihood, with `shared_key` mapping each timepoint to its year) and
+hands it to the observation function as `shared`. With `cache = TRUE`, an HMC
+block that moves none of the parameters behind those values reuses them. Which
+parameters those are is worked out from the function bodies, as for `depends=`.
+`et_model(log_density = )` adds terms over the parameters alone, such as a
+penalty, or the log-Jacobian of a parameter sampled through a transformation.
+
 ## Autodiff backends
 
 ```r

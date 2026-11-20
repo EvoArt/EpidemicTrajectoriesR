@@ -370,11 +370,39 @@ et_focal <- function(data, i) {
 #' @param extras Named list of your own data, reachable as `data$name`. An
 #'   [et_spatial_captures()] object may be one of them.
 #' @param helpers List of [et_helper()] declarations callable from any body.
+#' @param observation_shared Optional `function(model, data, i, key)`: whatever
+#'   the observation weights at every timepoint with `shared_key(t) == key`
+#'   need, computed once per individual and key and handed to
+#'   `observation_weights` as its fifth argument, `shared`. It returns a number,
+#'   or a named `list()` read as `shared$name`. Worth it for an expensive term
+#'   common to several timepoints, such as a year's capture likelihood.
+#' @param shared_key,n_keys `function(t)` giving the key of timepoint `t`, and
+#'   the number of keys (keys run from 1 to `n_keys`). Left out, every
+#'   timepoint is its own key.
+#' @param per_evaluation Optional `function(model, data)` returning a named
+#'   `list()` of values computed once per likelihood evaluation rather than at
+#'   every step (a random walk's cumulative sum, a table of rates, a
+#'   reparameterisation). The values are added to `model`, so every other body
+#'   reads them as `model$name`. Vectors are allocated in the parameters' number
+#'   type (`numeric(n)`), and every number in the list is converted to it unless
+#'   it is a whole number or a logical, which stay as they are so they can index.
+#' @param cache `TRUE` to reuse observation values an HMC block cannot change:
+#'   a block that moves none of the parameters `observation_shared` reads reuses
+#'   the shared values, and one that moves none of the parameters the
+#'   observations read reuses the observation weights. Which parameters those are
+#'   is worked out from the bodies, as for `depends=`, through `per_evaluation`
+#'   and the helpers. A named list `list(shared = , weights = , latents = )`
+#'   gives them by hand instead (needed only when a body is an [et_julia()]
+#'   without `reads`); it is checked against what the bodies read, and refused
+#'   if it leaves any out, since a stale cache is silently wrong. `latents`
+#'   names the latents `observation_shared` reads (all of them if left out).
 #' @return An object of class `et_latent_data`.
 #' @export
 et_latent_data <- function(n_individuals, n_timepoints, transitions, starting_state,
                            observation_weights = NULL, latents,
-                           sampling_period = NULL, extras = list(), helpers = list()) {
+                           sampling_period = NULL, extras = list(), helpers = list(),
+                           observation_shared = NULL, shared_key = NULL, n_keys = NULL,
+                           per_evaluation = NULL, cache = FALSE) {
   if (!inherits(transitions, "et_transitions") || !isTRUE(transitions$weights)) {
     stop("et_latent_data(): `transitions` must come from et_transitions(..., ",
          "weights = TRUE).", call. = FALSE)
@@ -422,12 +450,68 @@ et_latent_data <- function(n_individuals, n_timepoints, transitions, starting_st
     storage.mode(sampling_period) <- "integer"
   }
   for (nm in names(latents)) check_latent_values(latents[[nm]], nm, n_individuals, extras)
+  is_body <- function(f) is.function(f) || inherits(f, "et_julia")
+  if (!is.null(observation_shared)) {
+    if (!is_body(observation_shared)) {
+      stop("et_latent_data(): `observation_shared` must be a function(model, data, ",
+           "i, key) or an et_julia().", call. = FALSE)
+    }
+    if (is.null(observation_weights)) {
+      stop("et_latent_data(): `observation_shared` is handed to ",
+           "`observation_weights`, so give those too.", call. = FALSE)
+    }
+  }
+  if (!is.null(shared_key) || !is.null(n_keys)) {
+    if (is.null(observation_shared)) {
+      stop("et_latent_data(): `shared_key` and `n_keys` key the values of ",
+           "`observation_shared`; give that too.", call. = FALSE)
+    }
+    if (is.null(shared_key) || is.null(n_keys)) {
+      stop("et_latent_data(): give `shared_key` and `n_keys` together.", call. = FALSE)
+    }
+    if (!is.function(shared_key) || length(formals(shared_key)) != 1L) {
+      stop("et_latent_data(): `shared_key` must be a function of the timepoint.",
+           call. = FALSE)
+    }
+    n_keys <- as_count(n_keys, "n_keys")
+  }
+  if (!is.null(per_evaluation) && !is_body(per_evaluation)) {
+    stop("et_latent_data(): `per_evaluation` must be a function(model, data) or ",
+         "an et_julia().", call. = FALSE)
+  }
+  cache <- check_cache_arg(cache, latents)
   structure(list(
     n_individuals = n_individuals, n_timepoints = n_timepoints,
     transitions = transitions, starting_state = starting_state,
     observation_weights = observation_weights, latents = latents,
-    sampling_period = sampling_period, extras = extras, helpers = helpers),
+    sampling_period = sampling_period, extras = extras, helpers = helpers,
+    observation_shared = observation_shared, shared_key = shared_key,
+    n_keys = n_keys, per_evaluation = per_evaluation, cache = cache),
     class = "et_latent_data")
+}
+
+# FALSE, TRUE (derive the names), or the names by hand. Parameter names are
+# checked against the model in codegen, where the parameters are known.
+check_cache_arg <- function(cache, latents) {
+  if (isFALSE(cache) || is.null(cache)) return(NULL)
+  if (isTRUE(cache)) return(list(derive = TRUE))
+  if (!is.list(cache) || is.null(names(cache)) ||
+      !all(names(cache) %in% c("shared", "weights", "latents"))) {
+    stop("et_latent_data(): `cache` must be TRUE, FALSE, or ",
+         "list(shared = , weights = , latents = ).", call. = FALSE)
+  }
+  for (f in names(cache)) {
+    if (!is.null(cache[[f]]) && !is.character(cache[[f]])) {
+      stop("et_latent_data(): `cache$", f, "` must be a character vector of names.",
+           call. = FALSE)
+    }
+  }
+  bad <- setdiff(cache$latents, names(latents))
+  if (length(bad)) {
+    stop("et_latent_data(): `cache$latents` names unknown latent(s): ",
+         paste(bad, collapse = ", "), ".", call. = FALSE)
+  }
+  c(list(derive = FALSE), cache)
 }
 
 # Names LatentHMMData answers itself, so an extra under one would never be read.
