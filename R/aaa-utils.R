@@ -9,6 +9,9 @@
 
 julia_num <- function(x) {
   if (is.logical(x)) return(if (isTRUE(x)) "true" else "false")
+  # NaN is a number in both languages; R's is.na() is TRUE for it too, so it is
+  # let through before NA, which Julia has no literal for, is refused.
+  if (is.nan(x)) return("NaN")
   if (is.na(x)) stop("cannot emit NA as a Julia literal.")
   if (is.integer(x)) return(as.character(x))
   if (!is.finite(x)) {
