@@ -73,7 +73,7 @@ test_that("et_interweave gives the latent kernel its parameters", {
   src <- g$src
   expect_match(src, paste0("(:latents, :b) => interweave_kernel(LATENT!, Interweave((:b,), ",
                            "et_interweave_step; field=:S, elements=et_interweave_elements, ",
-                           "scale=0.05, centred=0.05, n=3); n_adapt=N_ADAPT, params=et_params)"),
+                           "radius=Inf, scale=0.05, centred=0.05, n=3); n_adapt=N_ADAPT, params=et_params)"),
                fixed = TRUE)
   expect_match(src, "function et_interweave_step_r(model, u)", fixed = TRUE)
   expect_match(src, "function et_interweave_elements(i)", fixed = TRUE)
@@ -88,6 +88,10 @@ test_that("et_interweave gives the latent kernel its parameters", {
                                        et_adaptive_hmc(c("a", "b", "p", "q")))),
                "more than one block")
   expect_error(et_interweave("b", field = "S", step = function(model) 1), "function\\(model, u\\)")
+  expect_error(et_interweave("b", field = "S", radius = 0), "positive")
+  radial <- et_julia_source(m, list(et_interweave("b", field = "S", radius = 2),
+                                    et_adaptive_hmc(c("a", "p", "q"))))$src
+  expect_match(radial, "elements=nothing, radius=2.0, scale=0.05", fixed = TRUE)
 })
 
 test_that("a model samples with joint moves, pgas and interweaving", {
@@ -97,7 +101,8 @@ test_that("a model samples with joint moves, pgas and interweaving", {
   m <- lt_model_field(et_field(1, LT_Y, prior = normal_dist(0, 1), index = lt_year,
                                init = lt_fixture()$S0, moves = c("pair", "shift"),
                                pgas = et_pgas(8, scales = 0.5)))
-  fit <- et_sample(m, list(et_interweave("b", field = "S"), et_adaptive_hmc(c("a", "p", "q"), n_steps = 4)),
+  fit <- et_sample(m, list(et_interweave("b", field = "S", radius = 0.5),
+                           et_adaptive_hmc(c("a", "p", "q"), n_steps = 4)),
                    n_sweeps = 30, n_adapts = 20, quiet = TRUE)
   expect_length(fit$draws$b, 30)
   expect_true(all(is.finite(fit$draws$b)))

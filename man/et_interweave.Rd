@@ -9,6 +9,7 @@ et_interweave(
   field,
   step = NULL,
   elements = NULL,
+  radius = Inf,
   scale = 0.05,
   centred = 0.05,
   n = 3
@@ -25,6 +26,12 @@ Jacobian of that map in their sampled coordinates. Return a \code{logjac} of
 
 \item{elements}{Optional \verb{function(i)} giving the elements of individual \code{i}
 to stretch, e.g. only the years the likelihood reads.}
+
+\item{radius}{Optional: stretch each step along its direction by the flow of
+\code{dr/du = r / (1 + (r/radius)^2)} instead, so steps much shorter than
+\code{radius} scale by about \code{exp(u)} and much longer ones hardly move. For a
+parameter that scales the short steps only, e.g. a resident movement scale
+when some steps are long dispersals.}
 
 \item{scale, centred}{Starting sds of the stretch and of the random walk.}
 

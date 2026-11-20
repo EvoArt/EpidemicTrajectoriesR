@@ -560,8 +560,8 @@ interweave_src <- function(model, b, helpers) {
     el <- "et_interweave_elements"
   }
   list(fns = fns, ctor = sprintf(
-    "Interweave(%s, et_interweave_step; field=%s, elements=%s, scale=%s, centred=%s, n=%s)",
-    pars, julia_symbol(b$field), el, julia_float(b$scale), julia_float(b$centred), julia_int(b$n)))
+    "Interweave(%s, et_interweave_step; field=%s, elements=%s, radius=%s, scale=%s, centred=%s, n=%s)",
+    pars, julia_symbol(b$field), el, julia_float(b$radius), julia_float(b$scale), julia_float(b$centred), julia_int(b$n)))
 }
 
 run_src_latent <- function(model) {

@@ -239,12 +239,20 @@ et_kernel_julia <- function(vars, src) {
 #'   `-Inf` to reject. By default each of `vars` (a log scale) is moved by `u`.
 #' @param elements Optional `function(i)` giving the elements of individual `i`
 #'   to stretch, e.g. only the years the likelihood reads.
+#' @param radius Optional: stretch each step along its direction by the flow of
+#'   `dr/du = r / (1 + (r/radius)^2)` instead, so steps much shorter than
+#'   `radius` scale by about `exp(u)` and much longer ones hardly move. For a
+#'   parameter that scales the short steps only, e.g. a resident movement scale
+#'   when some steps are long dispersals.
 #' @param scale,centred Starting sds of the stretch and of the random walk.
 #' @param n Rounds per sweep.
 #' @return An `et_block`.
 #' @export
-et_interweave <- function(vars, field, step = NULL, elements = NULL, scale = 0.05,
-                          centred = 0.05, n = 3) {
+et_interweave <- function(vars, field, step = NULL, elements = NULL, radius = Inf,
+                          scale = 0.05, centred = 0.05, n = 3) {
+  if (!is.numeric(radius) || length(radius) != 1L || is.na(radius) || radius <= 0) {
+    stop("et_interweave(): `radius` must be a positive number.", call. = FALSE)
+  }
   if (!is.character(field) || length(field) != 1L) {
     stop("et_interweave(): `field` is the name of an et_field() latent.", call. = FALSE)
   }
@@ -253,7 +261,7 @@ et_interweave <- function(vars, field, step = NULL, elements = NULL, scale = 0.0
     stop("et_interweave(): `elements` must be function(i).", call. = FALSE)
   }
   new_block("interweave", as.character(vars), field = field, step = step,
-            elements = elements, scale = as.numeric(scale), centred = as.numeric(centred),
+            elements = elements, radius = as.numeric(radius), scale = as.numeric(scale), centred = as.numeric(centred),
             n = as.integer(n))
 }
 
