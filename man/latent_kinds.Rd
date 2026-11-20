@@ -7,7 +7,17 @@
 \alias{et_shared_latent}
 \title{Latent variables of a weighted chain.}
 \usage{
-et_field(dim, n, prior, index = NULL, touches = NULL, scale = 1, init = NULL)
+et_field(
+  dim,
+  n,
+  prior,
+  index = NULL,
+  touches = NULL,
+  scale = 1,
+  init = NULL,
+  moves = character(),
+  pgas = NULL
+)
 
 et_per_individual(
   prior,
@@ -42,6 +52,17 @@ timepoints (\code{a:b}) whose weights or observations read element \code{e}.}
 \code{\link[=et_starting_centres]{et_starting_centres()}} and for a shared latent \code{\link[=et_starting_detectors]{et_starting_detectors()}}.
 Left out, the latent is drawn from its prior (a parameter-dependent prior
 from the \code{observed} values).}
+
+\item{moves}{For \code{et_field()}, extra moves of an individual's elements
+together, after the one-element steps: any of \code{"pair"} (two consecutive
+elements moved as one), \code{"shift"} (all of them moved as one), \code{"scale"}
+(pulled towards or pushed from their mean) and \code{"neighbour"} (an element
+proposed next to the previous or next one). They help when consecutive
+elements are tightly linked, e.g. activity centres under a narrow movement
+kernel.}
+
+\item{pgas}{For \code{et_field()}, \code{\link[=et_pgas]{et_pgas()}} to also redraw each individual's
+elements together once per sweep by particle Gibbs. Needs \code{index}.}
 
 \item{observed}{A vector with \code{NA} where the value is unknown; known values
 are fixed.}

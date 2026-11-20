@@ -52,6 +52,15 @@ check_dims <- function(dim, n, what) {
 #' @param touches Instead of `index`, `function(e)` returning the range of
 #'   timepoints (`a:b`) whose weights or observations read element `e`.
 #' @param scale Starting random-walk scale, adapted during warm-up.
+#' @param moves For `et_field()`, extra moves of an individual's elements
+#'   together, after the one-element steps: any of `"pair"` (two consecutive
+#'   elements moved as one), `"shift"` (all of them moved as one), `"scale"`
+#'   (pulled towards or pushed from their mean) and `"neighbour"` (an element
+#'   proposed next to the previous or next one). They help when consecutive
+#'   elements are tightly linked, e.g. activity centres under a narrow movement
+#'   kernel.
+#' @param pgas For `et_field()`, [et_pgas()] to also redraw each individual's
+#'   elements together once per sweep by particle Gibbs. Needs `index`.
 #' @param init Starting values: an array of the latent's shape, or for a field
 #'   [et_starting_centres()] and for a shared latent [et_starting_detectors()].
 #'   Left out, the latent is drawn from its prior (a parameter-dependent prior
@@ -67,7 +76,7 @@ NULL
 #' @rdname latent_kinds
 #' @export
 et_field <- function(dim, n, prior, index = NULL, touches = NULL, scale = 1,
-                     init = NULL) {
+                     init = NULL, moves = character(), pgas = NULL) {
   check_dims(dim, n, "et_field()")
   check_coord_prior(prior, dim, "et_field()")
   if (is.null(index) == is.null(touches)) {
@@ -77,9 +86,78 @@ et_field <- function(dim, n, prior, index = NULL, touches = NULL, scale = 1,
     stop("et_field(): `init` must be a numeric array or et_starting_centres().",
          call. = FALSE)
   }
+  moves <- as.character(moves)
+  bad <- setdiff(moves, .field_moves)
+  if (length(bad)) {
+    stop("et_field(): `moves` must be among ", paste0("\"", .field_moves, "\"", collapse = ", "),
+         "; got ", paste0("\"", bad, "\"", collapse = ", "), ".", call. = FALSE)
+  }
+  if (!is.null(pgas)) {
+    if (!inherits(pgas, "et_pgas")) {
+      stop("et_field(): `pgas` must come from et_pgas().", call. = FALSE)
+    }
+    if (is.null(index)) stop("et_field(): `pgas` needs `index`.", call. = FALSE)
+    a <- pgas$anchors
+    if (!is.null(a) && !identical(as.integer(dim(a)[1:2]), c(as.integer(dim), as.integer(n)))) {
+      stop("et_field(): `pgas` anchors must be a ", dim, " x ", n, " x n_individuals array.",
+           call. = FALSE)
+    }
+  }
   structure(list(kind = "field", dim = as.integer(dim), n = as.integer(n),
                  prior = prior, index = index, touches = touches,
-                 scale = as.numeric(scale), init = init), class = "et_latent")
+                 scale = as.numeric(scale), init = init, moves = unique(moves),
+                 pgas = pgas), class = "et_latent")
+}
+
+.field_moves <- c("pair", "shift", "scale", "neighbour")
+
+#' Particle Gibbs for a field's paths.
+#'
+#' Given to [et_field()] as `pgas`: once per sweep, each individual's elements
+#' in use are redrawn together by conditional sequential Monte Carlo with
+#' ancestor sampling (Lindsten, Jordan and Schön 2014), the hidden chain summed
+#' out within each particle. This moves a whole path at once, which one element
+#' at a time cannot when consecutive elements are tightly linked.
+#'
+#' Each element is proposed from an equal mixture of normals around the
+#' previous element (one per entry of `scales`), a normal around the
+#' individual's anchor for that element (when given and not `NA`), and the
+#' prior.
+#'
+#' @param particles Number of particles, at least 2.
+#' @param scales Standard deviations of the proposals around the previous
+#'   element, e.g. a resident and a dispersal scale. Defaults to the field's
+#'   `scale`.
+#' @param anchors Optional `dim x n x n_individuals` array of points to propose
+#'   around, `NA` for none, e.g. each individual's mean capture location in each
+#'   year. Data, not the current values.
+#' @param anchor_scale Standard deviation of the proposal around an anchor.
+#'   Defaults to the field's `scale`.
+#' @return An object of class `et_pgas`.
+#' @export
+#' @examples
+#' et_pgas(particles = 32, scales = c(10, 600))
+et_pgas <- function(particles = 32, scales = NULL, anchors = NULL, anchor_scale = NULL) {
+  if (!is.numeric(particles) || length(particles) != 1L || is.na(particles) ||
+      particles != round(particles) || particles < 2) {
+    stop("et_pgas(): `particles` must be a whole number, at least 2.", call. = FALSE)
+  }
+  for (x in list(list(scales, "scales"), list(anchor_scale, "anchor_scale"))) {
+    v <- x[[1]]
+    if (!is.null(v) && (!is.numeric(v) || !length(v) || anyNA(v) || any(v <= 0))) {
+      stop("et_pgas(): `", x[[2]], "` must be positive numbers.", call. = FALSE)
+    }
+  }
+  if (length(anchor_scale) > 1L) stop("et_pgas(): `anchor_scale` is one number.", call. = FALSE)
+  if (!is.null(anchors)) {
+    if (length(dim(anchors)) != 3L || !(is.numeric(anchors) || all(is.na(anchors)))) {
+      stop("et_pgas(): `anchors` must be a numeric dim x n x n_individuals array.", call. = FALSE)
+    }
+    storage.mode(anchors) <- "double"
+    anchors[is.na(anchors)] <- NaN
+  }
+  structure(list(particles = as.integer(particles), scales = scales, anchors = anchors,
+                 anchor_scale = anchor_scale), class = "et_pgas")
 }
 
 #' @rdname latent_kinds

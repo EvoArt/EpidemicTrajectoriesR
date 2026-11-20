@@ -213,6 +213,50 @@ et_kernel_julia <- function(vars, src) {
   new_block("julia", as.character(vars), src = src)
 }
 
+#' Interweave parameters with a field's paths.
+#'
+#' For an [et_latent_data()] model with a parameter that sets the scale of the
+#' steps between an individual's consecutive field elements, e.g. a movement
+#' scale and the activity centres it links. Updated one at a time, each mixes
+#' slowly: a narrow scale pins the paths and the paths pin the scale. This
+#' block moves them together by interweaving (Yu and Meng 2011).
+#'
+#' Each sweep, after the latents, `n` rounds of:
+#' * a random walk on the parameters, the paths held;
+#' * a stretch: `u ~ N(0, scale^2)`, the parameters moved by `step`, and every
+#'   individual's steps between its elements in use (or `elements(i)`)
+#'   multiplied by `exp(u)`, each path anchored at its first element.
+#'
+#' Both are Metropolis steps on the full posterior, so the model is unchanged.
+#' The step sizes adapt during warm-up. The block's parameters belong to it
+#' alone: leave them out of the HMC blocks.
+#'
+#' @param vars The parameters, as sampled.
+#' @param field The name of the [et_field()] latent.
+#' @param step Optional `function(model, u)` returning `list(<each of vars> =
+#'   new value, logjac = )`: the parameters after the stretch, and the log
+#'   Jacobian of that map in their sampled coordinates. Return a `logjac` of
+#'   `-Inf` to reject. By default each of `vars` (a log scale) is moved by `u`.
+#' @param elements Optional `function(i)` giving the elements of individual `i`
+#'   to stretch, e.g. only the years the likelihood reads.
+#' @param scale,centred Starting sds of the stretch and of the random walk.
+#' @param n Rounds per sweep.
+#' @return An `et_block`.
+#' @export
+et_interweave <- function(vars, field, step = NULL, elements = NULL, scale = 0.05,
+                          centred = 0.05, n = 3) {
+  if (!is.character(field) || length(field) != 1L) {
+    stop("et_interweave(): `field` is the name of an et_field() latent.", call. = FALSE)
+  }
+  if (!is.null(step)) check_protocol_formals(step, c("model", "u"), "interweave step", "step")
+  if (!is.null(elements) && (!is.function(elements) || length(formals(elements)) != 1L)) {
+    stop("et_interweave(): `elements` must be function(i).", call. = FALSE)
+  }
+  new_block("interweave", as.character(vars), field = field, step = step,
+            elements = elements, scale = as.numeric(scale), centred = as.numeric(centred),
+            n = as.integer(n))
+}
+
 # ---- assembly ---------------------------------------------------------------
 
 # Fill in the blocks the user did not specify, and check the ones they did.
@@ -226,16 +270,21 @@ resolve_blocks <- function(model, blocks) {
   for (b in blocks) {
     if (!inherits(b, "et_block")) {
       stop("every entry of `blocks` must come from et_nuts(), et_hmc(), ",
-           "et_iffbs(), et_conjugate*() or et_kernel_julia().", call. = FALSE)
+           "et_iffbs(), et_interweave(), et_conjugate*() or et_kernel_julia().", call. = FALSE)
     }
   }
   is_traj <- vapply(blocks, function(b) b$kind == "iffbs", logical(1))
+  is_iw <- vapply(blocks, function(b) b$kind == "interweave", logical(1))
+  if (any(is_iw) && !is_latent(model)) {
+    stop("et_interweave() works with the paths of an et_field() latent, so only ",
+         "for an et_latent_data() model.", call. = FALSE)
+  }
   if (is_collapsed(model)) {
     # Nothing to resample and nothing to condition on: the trajectory is summed
     # out inside the likelihood. A kernel that reads a sampled X would be
     # conditioning on a variable the model no longer has.
     bad <- vapply(blocks, function(b)
-      !(b$kind %in% c("nuts", "hmc", "adaptive_hmc", "julia")), logical(1))
+      !(b$kind %in% c("nuts", "hmc", "adaptive_hmc", "julia", "interweave")), logical(1))
     if (any(bad)) {
       stop("a model whose trajectories are summed out has no latent trajectory, ",
            "so it takes no iFFBS block and no conjugate kernel (",

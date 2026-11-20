@@ -39,7 +39,11 @@
   per_evaluation = list(args = c("model", "data"), vector = FALSE,
                         keep_return = TRUE, settle_list = TRUE, typed_alloc = TRUE),
   # An extra term of the log density, over the parameters alone.
-  log_density    = list(args = "model", vector = FALSE)
+  log_density    = list(args = "model", vector = FALSE),
+  # An et_interweave() step: the new values of its parameters and the log
+  # Jacobian, as a list(), given the parameters and the stretch u.
+  interweave_step = list(args = c("model", "u"), vector = FALSE,
+                         keep_return = TRUE, settle_list = TRUE)
 )
 
 #' The call protocols a user function can be transpiled into.

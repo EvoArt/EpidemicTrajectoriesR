@@ -143,7 +143,7 @@ generate_latent_module <- function(model, blocks, module_name) {
       section("latent variables", c(latents_src, init_src)),
       section("data", data_src),
       section("the model", pb_latent_model_src(model)),
-      section("sampler", latent_gibbs_src(model, blocks)),
+      section("sampler", latent_gibbs_src(model, blocks, helpers)),
       section("runner", qualify_base(run_src_latent(model))),
       section("depends= validator", qualify_base(check_src_marginal(model))),
       section("parameter draws from R", qualify_base(unflatten_src(model))),
@@ -364,8 +364,9 @@ latent_src <- function(nm, k, d, helpers, add_payload) {
                                 paste0(what, ": `touches`"))
       where <- sprintf("touches=et_touches_%s", nm)
     }
-    decl <- sprintf("%s ~ Field(%s, %s; prior=%s, %s, scale=%s)", nm, julia_int(k$dim),
-                    julia_int(k$n), coord_prior_src(k$prior), where, julia_float(k$scale))
+    decl <- sprintf("%s ~ Field(%s, %s; prior=%s, %s, scale=%s%s)", nm, julia_int(k$dim),
+                    julia_int(k$n), coord_prior_src(k$prior), where, julia_float(k$scale),
+                    field_extras_src(nm, k, d, add_payload, function(b) bindings <<- c(bindings, b)))
   } else if (k$kind == "shared") {
     decl <- sprintf("%s ~ Shared(%s, %s; prior=%s, scale=%s)", nm, julia_int(k$dim),
                     julia_int(k$n), coord_prior_src(k$prior), julia_float(k$scale))
@@ -470,17 +471,97 @@ pb_latent_model_src <- function(model) {
           indent(paste(lines, collapse = "\n")))
 }
 
+# A field's joint moves and particle Gibbs, as Field keywords (with a leading
+# comma), the anchors passed as payload.
+field_extras_src <- function(nm, k, d, add_payload, add_binding) {
+  out <- character()
+  if (length(k$moves)) {
+    out <- c(out, sprintf("moves=(%s,)", paste(julia_symbol(k$moves), collapse = ", ")))
+  }
+  p <- k$pgas
+  if (!is.null(p)) {
+    parts <- sprintf("particles=%s", julia_int(p$particles))
+    if (!is.null(p$scales)) {
+      parts <- c(parts, sprintf("scales=(%s,)", paste(vapply(p$scales, julia_float, character(1)),
+                                                     collapse = ", ")))
+    }
+    if (!is.null(p$anchors)) {
+      if (dim(p$anchors)[3] != d$n_individuals) {
+        stop(sprintf("latent '%s': `pgas` anchors must be %d x %d x %d.", nm, k$dim, k$n,
+                     d$n_individuals), call. = FALSE)
+      }
+      add_binding(add_payload(paste0("_etr_", nm, "_anchors"), p$anchors, "Float64"))
+      parts <- c(parts, sprintf("anchors=_etr_%s_anchors", nm))
+    }
+    if (!is.null(p$anchor_scale)) {
+      parts <- c(parts, sprintf("anchor_scale=%s", julia_float(p$anchor_scale)))
+    }
+    out <- c(out, sprintf("pgas=(; %s)", paste(parts, collapse = ", ")))
+  }
+  if (length(out)) paste0(", ", paste(out, collapse = ", ")) else ""
+}
+
 # The latent kernel first, so each sweep's HMC blocks see the latents it drew.
-latent_gibbs_src <- function(model, blocks) {
-  entries <- c(sprintf("%s => latent_kernel(LATENT!; params=et_params)",
-                       julia_symbol(LATENT_BLOCK)),
-               vapply(blocks, function(b) block_entry(model, b), character(1)))
+# With an et_interweave() block, the latent kernel also owns that block's
+# parameters and moves them with the field's paths.
+latent_gibbs_src <- function(model, blocks, helpers = list()) {
+  is_iw <- vapply(blocks, function(b) b$kind == "interweave", logical(1))
+  if (sum(is_iw) > 1L) {
+    stop("more than one et_interweave() block was given.", call. = FALSE)
+  }
+  iw_src <- NULL
+  if (any(is_iw)) {
+    b <- blocks[[which(is_iw)]]
+    iw_src <- interweave_src(model, b, helpers)
+    first <- sprintf("%s => interweave_kernel(LATENT!, %s; n_adapt=N_ADAPT, params=et_params)",
+                     julia_symbol_tuple(c(LATENT_BLOCK, b$vars)), iw_src$ctor)
+  } else {
+    first <- sprintf("%s => latent_kernel(LATENT!; params=et_params)", julia_symbol(LATENT_BLOCK))
+  }
+  entries <- c(first, vapply(blocks[!is_iw], function(b) block_entry(model, b), character(1)))
   paste0(
     params_closure_src(model), "\n\n",
+    if (!is.null(iw_src)) paste0(iw_src$fns, "\n\n"),
     "# `LATENT!` is the latent sampler, built per run: its proposal scales adapt\n",
-    "# over the run's warm-up.\n",
-    sprintf("et_sampler_for(DATA, LATENT!) = Gibbs(\n%s,\n)",
+    "# over the run's warm-up of N_ADAPT sweeps.\n",
+    sprintf("et_sampler_for(DATA, LATENT!, N_ADAPT=0) = Gibbs(\n%s,\n)",
             indent(paste(entries, collapse = ",\n"))))
+}
+
+# An et_interweave() block: the step (transpiled, or each parameter plus u),
+# the elements to stretch, and the Interweave constructor.
+interweave_src <- function(model, b, helpers) {
+  field <- model$data$latents[[b$field]]
+  if (is.null(field) || field$kind != "field") {
+    stop("et_interweave(): `field` must name an et_field() latent; got '", b$field, "'.",
+         call. = FALSE)
+  }
+  pars <- julia_symbol_tuple(b$vars)
+  if (is.null(b$step)) {
+    fns <- sprintf(paste0(
+      "# Interweaving: each of %s moved by u, with no Jacobian.\n",
+      "et_interweave_step(v, u) = ((; %s), 0.0)"), paste(b$vars, collapse = ", "),
+      paste(sprintf("%s=v.%s .+ u", b$vars, b$vars), collapse = ", "))
+  } else {
+    r <- et_transpile_role(b$step, "interweave_step", "et_interweave_step_r", helpers)
+    fns <- paste0(r$src, "\n\n", sprintf(paste0(
+      "# Interweaving: the step written in R, given the parameters and u; a\n",
+      "# logjac that is not finite rejects the move.\n",
+      "function et_interweave_step(v, u)\n",
+      "    r = et_interweave_step_r(et_params(v), u)\n",
+      "    isfinite(r.logjac) || return nothing\n",
+      "    (NamedTuple{%s}(map(p -> getproperty(r, p), %s)), Float64(r.logjac))\n",
+      "end"), pars, pars))
+  }
+  el <- "nothing"
+  if (!is.null(b$elements)) {
+    fns <- paste0(fns, "\n\n", transpile_plain_fn(b$elements, "et_interweave_elements", 1L, helpers,
+                                                  "et_interweave(): `elements`"))
+    el <- "et_interweave_elements"
+  }
+  list(fns = fns, ctor = sprintf(
+    "Interweave(%s, et_interweave_step; field=%s, elements=%s, scale=%s, centred=%s, n=%s)",
+    pars, julia_symbol(b$field), el, julia_float(b$scale), julia_float(b$centred), julia_int(b$n)))
 }
 
 run_src_latent <- function(model) {
@@ -498,7 +579,7 @@ run_src_latent <- function(model) {
     "    x_init === nothing && save_x === nothing ||\n",
     "        error(\"a weighted-chain model has no trajectory to start or save\")\n",
     "    m = et_the_model(DATA)\n",
-    "    spl = et_sampler_for(DATA, epidemic_latent_sampler(DATA; n_adapt=n_adapts, seed=seed))\n",
+    "    spl = et_sampler_for(DATA, epidemic_latent_sampler(DATA; n_adapt=n_adapts, seed=seed), n_adapts)\n",
     "    t0 = time()\n",
     "    # The latent block is kept live for conditioning but not stored per sweep.\n",
     "    chn = AbstractMCMC.sample(StableRNG(seed), m, spl, n_sweeps;\n",
