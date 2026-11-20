@@ -9,6 +9,7 @@ et_setup(
   project = NULL,
   dev = NULL,
   ad_backends = NULL,
+  install_julia = TRUE,
   verbose = FALSE,
   force = FALSE
 )
@@ -28,6 +29,10 @@ GitHub versions are used, and a local edit is invisible.}
 \item{ad_backends}{Extra automatic-differentiation backends to resolve and
 load, e.g. \code{"mooncake"}. Forward mode works out of the box; the
 reverse-mode backends are large, so they are opt-in. See \code{\link[=et_adtype]{et_adtype()}}.}
+
+\item{install_julia}{Install Julia (through JuliaCall) when none is found.
+The first run then downloads Julia and the pinned packages, which takes
+several minutes.}
 
 \item{verbose}{Print Julia's setup chatter.}
 

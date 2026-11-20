@@ -19,12 +19,16 @@
 #' @param ad_backends Extra automatic-differentiation backends to resolve and
 #'   load, e.g. `"mooncake"`. Forward mode works out of the box; the
 #'   reverse-mode backends are large, so they are opt-in. See [et_adtype()].
+#' @param install_julia Install Julia (through JuliaCall) when none is found.
+#'   The first run then downloads Julia and the pinned packages, which takes
+#'   several minutes.
 #' @param verbose Print Julia's setup chatter.
 #' @param force Re-run even if the session is already up.
 #' @return Invisibly `TRUE`.
 #' @export
 et_setup <- function(julia_home = NULL, project = NULL, dev = NULL,
-                     ad_backends = NULL, verbose = FALSE, force = FALSE) {
+                     ad_backends = NULL, install_julia = TRUE, verbose = FALSE,
+                     force = FALSE) {
   if (.et_state$ready && !force && is.null(dev) && is.null(ad_backends)) {
     return(invisible(TRUE))
   }
@@ -33,7 +37,8 @@ et_setup <- function(julia_home = NULL, project = NULL, dev = NULL,
          'install.packages("JuliaCall").', call. = FALSE)
   }
   if (is.null(project)) project <- et_julia_project()
-  JuliaCall::julia_setup(JULIA_HOME = julia_home, verbose = verbose)
+  JuliaCall::julia_setup(JULIA_HOME = julia_home, verbose = verbose,
+                         installJulia = install_julia)
   JuliaCall::julia_command(sprintf('using Pkg; Pkg.activate("%s"; io=devnull)',
                                    julia_path(project)))
   if (!is.null(dev)) {
