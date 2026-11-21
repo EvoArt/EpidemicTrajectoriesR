@@ -31,6 +31,13 @@
 #'   records where the archive is, so [et_convert_trajectories()] can be run
 #'   later.
 #' @param save_every Flush the archive every this many sweeps.
+#' @param init Optional named list of starting values for some or all of the
+#'   parameters, overriding each `prior(..., init =)` for this run only. For an
+#'   [et_latent_data()] model. Starting each chain this way, rather than by
+#'   building a new model, reuses the compiled model.
+#' @param latent_init Optional named list of starting values for latents, in
+#'   the shapes [et_latents()] describes, for this run only. For an
+#'   [et_latent_data()] model.
 #' @param keep_source Optional path to write the generated Julia to.
 #' @param quiet Suppress progress messages.
 #' @return An object of class `et_fit`. For a model with latents (from
@@ -40,8 +47,13 @@
 et_sample <- function(model, blocks = list(), n_sweeps = 1000, n_burn = 0,
                       n_adapts = 0, seed = 1, x_init = NULL,
                       adtype = "forwarddiff", save_x = NULL, save_every = 100,
-                      convert_x = TRUE, keep_source = NULL, quiet = FALSE) {
+                      convert_x = TRUE, keep_source = NULL, quiet = FALSE,
+                      init = NULL, latent_init = NULL) {
   et_require_session()
+  if ((!is.null(init) || !is.null(latent_init)) && !is_latent(model)) {
+    stop("et_sample(): `init` and `latent_init` are for an et_latent_data() model; ",
+         "set other models' starting values with prior(..., init =).", call. = FALSE)
+  }
   if (is_collapsed(model) && (!is.null(x_init) || !is.null(save_x))) {
     stop("et_sample(): a model whose trajectories are summed out has no ",
          "trajectory, so there is nothing to start from (`x_init`) or to save ",
@@ -83,12 +95,13 @@ et_sample <- function(model, blocks = list(), n_sweeps = 1000, n_burn = 0,
   } else {
     julia_save_x <- NULL
   }
+  run_init <- run_init_src(mod, model, init, latent_init)
   call <- sprintf(
-    "%s.et_run(; n_sweeps=%s, n_burn=%s, n_adapts=%s, seed=%s, x_init=%s, adtype=%s, save_x=%s, save_every=%s)",
+    "%s.et_run(; n_sweeps=%s, n_burn=%s, n_adapts=%s, seed=%s, x_init=%s, adtype=%s, save_x=%s, save_every=%s%s)",
     mod, julia_int(n_sweeps), julia_int(n_burn), julia_int(n_adapts),
     julia_int(seed), x_arg, adtype_to_julia(default_adtype(model, adtype)),
     if (is.null(julia_save_x)) "nothing" else julia_string(julia_path(julia_save_x)),
-    julia_int(save_every))
+    julia_int(save_every), run_init)
   raw <- JuliaCall::julia_eval(call)
 
   elapsed <- raw[["_elapsed"]]
@@ -357,4 +370,57 @@ et_iffbs_sweep <- function(model, x_init, blocks = list(), seed = 1) {
   out <- JuliaCall::julia_eval(sprintf(
     "%s.et_iffbs_sweep(Matrix{Int}(Main.%s); seed=%s)", mod, nm, julia_int(seed)))
   matrix(as.integer(out), nrow = nrow(x_init))
+}
+
+# A latent model's run-time starting values, as the extra keyword arguments of
+# its et_run: each value assigned to Main and read back with the declared shape.
+run_init_src <- function(mod, model, init, latent_init) {
+  if (is.null(init) && is.null(latent_init)) return("")
+  out <- character()
+  if (!is.null(init)) {
+    if (!is.list(init) || is.null(names(init)) || any(!nzchar(names(init)))) {
+      stop("et_sample(): `init` must be a named list.", call. = FALSE)
+    }
+    bad <- setdiff(names(init), model$par_names)
+    if (length(bad)) {
+      stop("et_sample(): `init` names unknown parameter(s): ", paste(bad, collapse = ", "), ".",
+           call. = FALSE)
+    }
+    parts <- vapply(names(init), function(nm) {
+      v <- as.numeric(init[[nm]]); n <- model$parameters[[nm]]$n
+      if (length(v) != n) {
+        stop(sprintf("et_sample(): `init$%s` has %d value(s); the parameter has %d.", nm,
+                     length(v), n), call. = FALSE)
+      }
+      jn <- sprintf("%s_init_%s", mod, nm)
+      JuliaCall::julia_assign(jn, v)
+      sprintf(if (n > 1L) "%s=Vector{Float64}(Main.%s)" else "%s=Float64(Main.%s[1])", nm, jn)
+    }, character(1))
+    out <- c(out, sprintf(", init=(; %s)", paste(parts, collapse = ", ")))
+  }
+  if (!is.null(latent_init)) {
+    lat <- model$data$latents
+    if (!is.list(latent_init) || is.null(names(latent_init))) {
+      stop("et_sample(): `latent_init` must be a named list.", call. = FALSE)
+    }
+    bad <- setdiff(names(latent_init), names(lat))
+    if (length(bad)) {
+      stop("et_sample(): `latent_init` names unknown latent(s): ", paste(bad, collapse = ", "), ".",
+           call. = FALSE)
+    }
+    parts <- vapply(names(latent_init), function(nm) {
+      k <- lat[[nm]]; v <- latent_init[[nm]]; N <- model$data$n_individuals
+      shape <- switch(k$kind, field = c(k$dim, k$n, N), shared = c(k$dim, k$n), N)
+      got <- if (is.null(dim(v))) length(v) else dim(v)
+      if (!is.numeric(v) || !identical(as.integer(got), as.integer(shape))) {
+        stop(sprintf("et_sample(): `latent_init$%s` must be %s, got %s.", nm,
+                     paste(shape, collapse = " x "), paste(got, collapse = " x ")), call. = FALSE)
+      }
+      jn <- sprintf("%s_latinit_%s", mod, nm)
+      JuliaCall::julia_assign(jn, if (length(shape) > 1L) array(as.numeric(v), shape) else as.numeric(v))
+      sprintf("%s=convert(typeof(current_state(%s.DATA).values.%s), Main.%s)", nm, mod, nm, jn)
+    }, character(1))
+    out <- c(out, sprintf(", latent_init=(; %s)", paste(parts, collapse = ", ")))
+  }
+  paste(out, collapse = "")
 }

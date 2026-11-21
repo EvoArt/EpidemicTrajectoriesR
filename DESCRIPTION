@@ -1,7 +1,7 @@
 Package: EpidemicTrajectoriesR
 Type: Package
 Title: Discrete-Time Individual-Level Epidemic Models from R, via Julia
-Version: 0.2.0
+Version: 0.3.0
 Authors@R: person("Arthur", "Newbury", email = "a.r.newbury@exeter.ac.uk",
     role = c("aut", "cre"))
 Description: Specify, fit and check discrete-time individual-level epidemic

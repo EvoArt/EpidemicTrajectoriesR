@@ -24,7 +24,7 @@ et_interweave(
 Jacobian of that map in their sampled coordinates. Return a \code{logjac} of
 \code{-Inf} to reject. By default each of \code{vars} (a log scale) is moved by \code{u}.}
 
-\item{elements}{Optional \verb{function(i)} giving the elements of individual \code{i}
+\item{elements}{Optional \verb{function(data, i)} giving the elements of individual \code{i}
 to stretch, e.g. only the years the likelihood reads.}
 
 \item{radius}{Optional: stretch each step along its direction by the flow of
@@ -52,11 +52,14 @@ Each sweep, after the latents, \code{n} rounds of:
 \itemize{
 \item a random walk on the parameters, the paths held;
 \item a stretch: \code{u ~ N(0, scale^2)}, the parameters moved by \code{step}, and every
-individual's steps between its elements in use (or \code{elements(i)})
+individual's steps between its elements in use (or \code{elements(data, i)})
 multiplied by \code{exp(u)}, each path anchored at its first element.
 }
 
 Both are Metropolis steps on the full posterior, so the model is unchanged.
 The step sizes adapt during warm-up. The block's parameters belong to it
 alone: leave them out of the HMC blocks.
+Several \code{et_interweave()} blocks may be given, e.g. one for a scale every
+individual shares and one for a subgroup's; they run in turn and may share
+parameters.
 }

@@ -519,7 +519,7 @@ weakdeps = ["Adapt", "ChainRulesCore"]
 
 [[deps.EpidemicTrajectories]]
 deps = ["Distributions", "LinearAlgebra", "Random", "Serialization", "StatsFuns"]
-git-tree-sha1 = "02f8c28f390f4e6d92078969f2e2b9c4a96b058c"
+git-tree-sha1 = "32d159f8e2c0f4747384e6ad86ee3fff77880b2a"
 repo-rev = "master"
 repo-url = "https://github.com/EvoArt/EpidemicTrajectories.git"
 uuid = "7100e41f-98d3-4508-a32b-553d87bf8b28"
@@ -980,7 +980,7 @@ version = "0.1.0"
 
 [[deps.PracticalEpiBayes]]
 deps = ["AdvancedHMC", "Distributions", "EpidemicTrajectories", "PracticalBayes", "Random"]
-git-tree-sha1 = "525f4b75edbd06da7e6e7fc751b9f4cafc2d2e4c"
+git-tree-sha1 = "9ef099b7b5c1abd0dce11363579f0818b0e66efe"
 repo-rev = "master"
 repo-url = "https://github.com/EvoArt/PracticalEpiBayes.git"
 uuid = "cd196020-bc6e-475c-bbbe-f14c51ea6e31"

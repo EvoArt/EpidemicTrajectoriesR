@@ -224,12 +224,15 @@ et_kernel_julia <- function(vars, src) {
 #' Each sweep, after the latents, `n` rounds of:
 #' * a random walk on the parameters, the paths held;
 #' * a stretch: `u ~ N(0, scale^2)`, the parameters moved by `step`, and every
-#'   individual's steps between its elements in use (or `elements(i)`)
+#'   individual's steps between its elements in use (or `elements(data, i)`)
 #'   multiplied by `exp(u)`, each path anchored at its first element.
 #'
 #' Both are Metropolis steps on the full posterior, so the model is unchanged.
 #' The step sizes adapt during warm-up. The block's parameters belong to it
 #' alone: leave them out of the HMC blocks.
+#' Several `et_interweave()` blocks may be given, e.g. one for a scale every
+#' individual shares and one for a subgroup's; they run in turn and may share
+#' parameters.
 #'
 #' @param vars The parameters, as sampled.
 #' @param field The name of the [et_field()] latent.
@@ -237,7 +240,7 @@ et_kernel_julia <- function(vars, src) {
 #'   new value, logjac = )`: the parameters after the stretch, and the log
 #'   Jacobian of that map in their sampled coordinates. Return a `logjac` of
 #'   `-Inf` to reject. By default each of `vars` (a log scale) is moved by `u`.
-#' @param elements Optional `function(i)` giving the elements of individual `i`
+#' @param elements Optional `function(data, i)` giving the elements of individual `i`
 #'   to stretch, e.g. only the years the likelihood reads.
 #' @param radius Optional: stretch each step along its direction by the flow of
 #'   `dr/du = r / (1 + (r/radius)^2)` instead, so steps much shorter than
@@ -257,8 +260,8 @@ et_interweave <- function(vars, field, step = NULL, elements = NULL, radius = In
     stop("et_interweave(): `field` is the name of an et_field() latent.", call. = FALSE)
   }
   if (!is.null(step)) check_protocol_formals(step, c("model", "u"), "interweave step", "step")
-  if (!is.null(elements) && (!is.function(elements) || length(formals(elements)) != 1L)) {
-    stop("et_interweave(): `elements` must be function(i).", call. = FALSE)
+  if (!is.null(elements) && (!is.function(elements) || length(formals(elements)) != 2L)) {
+    stop("et_interweave(): `elements` must be function(data, i).", call. = FALSE)
   }
   new_block("interweave", as.character(vars), field = field, step = step,
             elements = elements, radius = as.numeric(radius), scale = as.numeric(scale), centred = as.numeric(centred),
@@ -309,7 +312,11 @@ resolve_blocks <- function(model, blocks) {
   }
   rest <- blocks[!is_traj]
 
-  claimed <- unlist(lapply(rest, function(b) b$vars), use.names = FALSE)
+  # et_interweave() blocks all belong to the latent kernel, so they may share
+  # parameters with each other, but not with any other block.
+  iw_rest <- vapply(rest, function(b) b$kind == "interweave", logical(1))
+  claimed <- c(unlist(lapply(rest[!iw_rest], function(b) b$vars), use.names = FALSE),
+               unique(unlist(lapply(rest[iw_rest], function(b) b$vars), use.names = FALSE)))
   dup <- claimed[duplicated(claimed)]
   if (length(dup)) {
     stop("parameter(s) appear in more than one block: ",

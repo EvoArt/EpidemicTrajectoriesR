@@ -17,7 +17,9 @@ et_sample(
   save_every = 100,
   convert_x = TRUE,
   keep_source = NULL,
-  quiet = FALSE
+  quiet = FALSE,
+  init = NULL,
+  latent_init = NULL
 )
 }
 \arguments{
@@ -65,6 +67,15 @@ later.}
 \item{keep_source}{Optional path to write the generated Julia to.}
 
 \item{quiet}{Suppress progress messages.}
+
+\item{init}{Optional named list of starting values for some or all of the
+parameters, overriding each \code{prior(..., init =)} for this run only. For an
+\code{\link[=et_latent_data]{et_latent_data()}} model. Starting each chain this way, rather than by
+building a new model, reuses the compiled model.}
+
+\item{latent_init}{Optional named list of starting values for latents, in
+the shapes \code{\link[=et_latents]{et_latents()}} describes, for this run only. For an
+\code{\link[=et_latent_data]{et_latent_data()}} model.}
 }
 \value{
 An object of class \code{et_fit}. For a model with latents (from

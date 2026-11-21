@@ -502,26 +502,27 @@ field_extras_src <- function(nm, k, d, add_payload, add_binding) {
 }
 
 # The latent kernel first, so each sweep's HMC blocks see the latents it drew.
-# With an et_interweave() block, the latent kernel also owns that block's
-# parameters and moves them with the field's paths.
+# With et_interweave() blocks, the latent kernel also owns their parameters
+# and moves them with the field's paths, one block after another.
 latent_gibbs_src <- function(model, blocks, helpers = list()) {
   is_iw <- vapply(blocks, function(b) b$kind == "interweave", logical(1))
-  if (sum(is_iw) > 1L) {
-    stop("more than one et_interweave() block was given.", call. = FALSE)
-  }
-  iw_src <- NULL
+  fns <- NULL
   if (any(is_iw)) {
-    b <- blocks[[which(is_iw)]]
-    iw_src <- interweave_src(model, b, helpers)
+    iws <- blocks[is_iw]
+    srcs <- lapply(seq_along(iws), function(j)
+      interweave_src(model, iws[[j]], helpers, if (length(iws) > 1L) as.character(j) else ""))
+    fns <- paste(vapply(srcs, function(s) s$fns, character(1)), collapse = "\n\n")
+    vars <- unique(unlist(lapply(iws, function(b) b$vars)))
     first <- sprintf("%s => interweave_kernel(LATENT!, %s; n_adapt=N_ADAPT, params=et_params)",
-                     julia_symbol_tuple(c(LATENT_BLOCK, b$vars)), iw_src$ctor)
+                     julia_symbol_tuple(c(LATENT_BLOCK, vars)),
+                     paste(vapply(srcs, function(s) s$ctor, character(1)), collapse = ", "))
   } else {
     first <- sprintf("%s => latent_kernel(LATENT!; params=et_params)", julia_symbol(LATENT_BLOCK))
   }
   entries <- c(first, vapply(blocks[!is_iw], function(b) block_entry(model, b), character(1)))
   paste0(
     params_closure_src(model), "\n\n",
-    if (!is.null(iw_src)) paste0(iw_src$fns, "\n\n"),
+    if (!is.null(fns)) paste0(fns, "\n\n"),
     "# `LATENT!` is the latent sampler, built per run: its proposal scales adapt\n",
     "# over the run's warm-up of N_ADAPT sweeps.\n",
     sprintf("et_sampler_for(DATA, LATENT!, N_ADAPT=0) = Gibbs(\n%s,\n)",
@@ -530,38 +531,41 @@ latent_gibbs_src <- function(model, blocks, helpers = list()) {
 
 # An et_interweave() block: the step (transpiled, or each parameter plus u),
 # the elements to stretch, and the Interweave constructor.
-interweave_src <- function(model, b, helpers) {
+interweave_src <- function(model, b, helpers, sfx = "") {
   field <- model$data$latents[[b$field]]
   if (is.null(field) || field$kind != "field") {
     stop("et_interweave(): `field` must name an et_field() latent; got '", b$field, "'.",
          call. = FALSE)
   }
   pars <- julia_symbol_tuple(b$vars)
+  step <- paste0("et_interweave_step", sfx)
   if (is.null(b$step)) {
     fns <- sprintf(paste0(
       "# Interweaving: each of %s moved by u, with no Jacobian.\n",
-      "et_interweave_step(v, u) = ((; %s), 0.0)"), paste(b$vars, collapse = ", "),
+      "%s(v, u) = ((; %s), 0.0)"), paste(b$vars, collapse = ", "), step,
       paste(sprintf("%s=v.%s .+ u", b$vars, b$vars), collapse = ", "))
   } else {
-    r <- et_transpile_role(b$step, "interweave_step", "et_interweave_step_r", helpers)
+    r <- et_transpile_role(b$step, "interweave_step", paste0(step, "_r"), helpers)
     fns <- paste0(r$src, "\n\n", sprintf(paste0(
       "# Interweaving: the step written in R, given the parameters and u; a\n",
       "# logjac that is not finite rejects the move.\n",
-      "function et_interweave_step(v, u)\n",
-      "    r = et_interweave_step_r(et_params(v), u)\n",
+      "function %s(v, u)\n",
+      "    r = %s_r(et_params(v), u)\n",
       "    isfinite(r.logjac) || return nothing\n",
       "    (NamedTuple{%s}(map(p -> getproperty(r, p), %s)), Float64(r.logjac))\n",
-      "end"), pars, pars))
+      "end"), step, step, pars, pars))
   }
   el <- "nothing"
   if (!is.null(b$elements)) {
-    fns <- paste0(fns, "\n\n", transpile_plain_fn(b$elements, "et_interweave_elements", 1L, helpers,
-                                                  "et_interweave(): `elements`"))
-    el <- "et_interweave_elements"
+    el <- paste0("et_interweave_elements", sfx)
+    fns <- paste0(fns, "\n\n", transpile_plain_fn(b$elements, paste0(el, "_r"), 2L, helpers,
+                                                  "et_interweave(): `elements`"),
+                  sprintf("\n%s(i) = %s_r(DATA, i)", el, el))
   }
   list(fns = fns, ctor = sprintf(
-    "Interweave(%s, et_interweave_step; field=%s, elements=%s, radius=%s, scale=%s, centred=%s, n=%s)",
-    pars, julia_symbol(b$field), el, julia_float(b$radius), julia_float(b$scale), julia_float(b$centred), julia_int(b$n)))
+    "Interweave(%s, %s; field=%s, elements=%s, radius=%s, scale=%s, centred=%s, n=%s)",
+    pars, step, julia_symbol(b$field), el, julia_float(b$radius), julia_float(b$scale),
+    julia_float(b$centred), julia_int(b$n)))
 }
 
 run_src_latent <- function(model) {
@@ -573,17 +577,23 @@ run_src_latent <- function(model) {
   sprintf(paste0(
     "const INIT_PARS = (; %s)\n\n",
     "et_prepare!(X0) = X0\n\n",
+    "# `init` and `latent_init` are a run's own starting values (parameters, and\n",
+    "# latents by name), so one compiled module serves every chain.\n",
     "function et_run(; n_sweeps, n_burn=0, n_adapts=0, seed=1, x_init=nothing,\n",
     "                  adtype=ADTypes.AutoForwardDiff(), save_x=nothing,\n",
-    "                  save_every::Int=100)\n",
+    "                  save_every::Int=100, init=(;), latent_init=nothing)\n",
     "    x_init === nothing && save_x === nothing ||\n",
     "        error(\"a weighted-chain model has no trajectory to start or save\")\n",
+    "    if latent_init !== nothing\n",
+    "        DATA.current[] = latent_state(DATA.latent_decls, DATA.n_individuals;\n",
+    "                                      merge(current_state(DATA).values, latent_init)...)\n",
+    "    end\n",
     "    m = et_the_model(DATA)\n",
     "    spl = et_sampler_for(DATA, epidemic_latent_sampler(DATA; n_adapt=n_adapts, seed=seed), n_adapts)\n",
     "    t0 = time()\n",
     "    # The latent block is kept live for conditioning but not stored per sweep.\n",
     "    chn = AbstractMCMC.sample(StableRNG(seed), m, spl, n_sweeps;\n",
-    "                              init=INIT_PARS, n_adapts=n_adapts, adtype=adtype,\n",
+    "                              init=merge(INIT_PARS, init), n_adapts=n_adapts, adtype=adtype,\n",
     "                              save_states=(%s = :buffer,), discard_initial=n_burn)\n",
     "    out = _et_extract(chn, %s)\n",
     "    out[\"_elapsed\"] = time() - t0\n",

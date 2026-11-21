@@ -68,7 +68,7 @@ test_that("et_interweave gives the latent kernel its parameters", {
     list(b = model$b + u, logjac = 0)
   }
   g <- et_julia_source(m, list(et_interweave("b", field = "S", step = step,
-                                             elements = function(i) 1:3),
+                                             elements = function(data, i) 1:3),
                                et_adaptive_hmc(c("a", "p", "q"))))
   src <- g$src
   expect_match(src, paste0("(:latents, :b) => interweave_kernel(LATENT!, Interweave((:b,), ",
@@ -76,7 +76,8 @@ test_that("et_interweave gives the latent kernel its parameters", {
                            "radius=Inf, scale=0.05, centred=0.05, n=3); n_adapt=N_ADAPT, params=et_params)"),
                fixed = TRUE)
   expect_match(src, "function et_interweave_step_r(model, u)", fixed = TRUE)
-  expect_match(src, "function et_interweave_elements(i)", fixed = TRUE)
+  expect_match(src, "et_interweave_elements(i) = et_interweave_elements_r(DATA, i)", fixed = TRUE)
+  expect_match(src, "function et_interweave_elements_r(data, i)", fixed = TRUE)
   expect_match(src, "et_sampler_for(DATA, LATENT!, N_ADAPT=0) = Gibbs(", fixed = TRUE)
   default <- et_julia_source(m, list(et_interweave("b", field = "S"),
                                      et_adaptive_hmc(c("a", "p", "q"))))$src
@@ -107,4 +108,41 @@ test_that("a model samples with joint moves, pgas and interweaving", {
   expect_length(fit$draws$b, 30)
   expect_true(all(is.finite(fit$draws$b)))
   expect_true(length(unique(fit$draws$b)) > 1 && length(unique(fit$draws$a)) > 1)
+})
+
+test_that("several et_interweave blocks run in one latent kernel and may share parameters", {
+  m <- lt_model_field(et_field(1, LT_Y, prior = normal_dist(0, 1), index = lt_year,
+                               init = lt_fixture()$S0))
+  src <- et_julia_source(m, list(et_interweave("b", field = "S"),
+                                 et_interweave(c("a", "b"), field = "S", radius = 2,
+                                               elements = function(data, i) 1:2),
+                                 et_adaptive_hmc(c("p", "q"))))$src
+  expect_match(src, paste0("(:latents, :b, :a) => interweave_kernel(LATENT!, ",
+                           "Interweave((:b,), et_interweave_step1; field=:S, elements=nothing, ",
+                           "radius=Inf, scale=0.05, centred=0.05, n=3), ",
+                           "Interweave((:a, :b), et_interweave_step2; field=:S, ",
+                           "elements=et_interweave_elements2, radius=2.0"), fixed = TRUE)
+  expect_match(src, "et_interweave_step1(v, u) = ((; b=v.b .+ u), 0.0)", fixed = TRUE)
+  expect_match(src, "et_interweave_elements2(i) = et_interweave_elements2_r(DATA, i)", fixed = TRUE)
+  expect_error(et_julia_source(m, list(et_interweave("b", field = "S"),
+                                       et_adaptive_hmc(c("a", "b", "p", "q")))),
+               "more than one block")
+})
+
+test_that("init and latent_init start a run without building a new module", {
+  skip_without_latent_api()
+  m <- lt_model_field(et_field(1, LT_Y, prior = normal_dist(0, 1), index = lt_year,
+                               init = lt_fixture()$S0))
+  blocks <- list(et_adaptive_hmc(c("a", "b", "p", "q"), n_steps = 4))
+  f1 <- et_sample(m, blocks, n_sweeps = 5, n_adapts = 5, quiet = TRUE)
+  S2 <- array(0.5, c(1L, LT_Y, LT_N))
+  f2 <- et_sample(m, blocks, n_sweeps = 5, n_adapts = 5, seed = 2, quiet = TRUE,
+                  init = list(a = -1, q = 0.6), latent_init = list(S = S2))
+  expect_identical(f1$module, f2$module)
+  expect_true(all(is.finite(f2$draws$a)))
+  expect_error(et_sample(m, blocks, n_sweeps = 1, quiet = TRUE, init = list(zz = 1)), "unknown parameter")
+  expect_error(et_sample(m, blocks, n_sweeps = 1, quiet = TRUE, init = list(a = c(1, 2))), "has 2 value")
+  expect_error(et_sample(m, blocks, n_sweeps = 1, quiet = TRUE, latent_init = list(S = S2[, 1:2, , drop = FALSE])),
+               "must be 1 x 3 x 7")
+  expect_error(et_sample(m, blocks, n_sweeps = 1, quiet = TRUE, latent_init = list(W = 1)), "unknown latent")
 })
